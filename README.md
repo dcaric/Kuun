@@ -75,9 +75,14 @@ openssl rand -hex 32
 ### 4) Configure bot name and optional Gemini API key
 
 ```bash
-kuun name m1
+kuun name <insert name>
 kuun geminikey YOUR_API_KEY   # optional if you use OAuth login
 ```
+
+Important:
+- Replace `<insert name>` with your real trigger name (for example: `m1` or `kuun`).
+- In WhatsApp, commands must start with that exact name at the beginning of the message (example: `kuun - who are you`).
+- This is how Kuun knows the message is for it; normal chats from others will not trigger Kuun.
 
 ### 5) Authenticate Gemini CLI (required)
 
@@ -131,8 +136,8 @@ Scan QR in WhatsApp -> Linked Devices.
 ### 9) First WhatsApp test
 
 Send from WhatsApp:
-- `m1 help`
-- `m1 - what time is it in Zagreb?`
+- `kuun help`
+- `kuun - what time is it in Zagreb?`
 
 ## Daily Usage
 
@@ -144,16 +149,16 @@ kuun status
 ```
 
 WhatsApp examples:
-- `m1 - summarize latest AI trends`
-- `m1 g explain docker volumes simply`
-- `m1 status`
-- `m1 help`
+- `kuun - summarize latest AI trends`
+- `kuun g explain docker volumes simply`
+- `kuun status`
+- `kuun help`
 
 ## Scheduler (WhatsApp)
 
-- `m1 set job which will at 13h check weather in Split`
-- `m1 list jobs`
-- `m1 remove the scheduled job with ID abc12345`
+- `kuun set job which will at 13h check weather in Split`
+- `kuun list jobs`
+- `kuun remove the scheduled job with ID abc12345`
 
 Notes:
 - Scheduled jobs are stored in `brain/scheduled_jobs.json`.
