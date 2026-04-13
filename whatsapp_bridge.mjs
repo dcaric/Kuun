@@ -14,8 +14,10 @@ const __dirname = path.dirname(__filename);
 
 const FASTAPI_PORT = process.env.FASTAPI_PORT || '8100';
 const WA_API_PORT = Number(process.env.WA_API_PORT || '8101');
+const WA_API_BIND_HOST = process.env.WA_API_BIND_HOST || '127.0.0.1';
 const SERVER_URL = process.env.BRIDGE_SERVER_URL || `http://localhost:${FASTAPI_PORT}/webhook/message`;
 const BOT_TRIGGER = (process.env.BOT_TRIGGER || 'kuun').trim();
+const BRIDGE_SECRET_KEY = process.env.BRIDGE_SECRET_KEY || '';
 const AUTH_DIR = path.resolve(__dirname, '.kuun_cache');
 const ALLOWED_NUMBERS_FILE = path.resolve(__dirname, 'allowed_numbers.txt');
 
@@ -61,8 +63,8 @@ function loadAllowedNumbers() {
 
 function isAllowedSender(jid, allowlist) {
   if (!allowlist || allowlist.size === 0) {
-    // Empty allowlist = disabled (allow all)
-    return true;
+    // Security-first: empty allowlist means deny all.
+    return false;
   }
 
   if (!jid) return false;
@@ -143,6 +145,8 @@ async function startWhatsApp() {
           text,
           sender: jid,
           source: 'whatsapp',
+        }, {
+          headers: { Authorization: `Bearer ${BRIDGE_SECRET_KEY}` },
         });
 
         await sock.sendMessage(jid, {
@@ -159,6 +163,12 @@ const app = express();
 app.use(express.json());
 
 app.post('/send', async (req, res) => {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : '';
+  if (!token || token !== BRIDGE_SECRET_KEY) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
   const { to, text } = req.body;
   if (!global.whatsappSock || !to || !text) {
     return res.status(500).json({ error: 'WhatsApp not connected or missing params' });
@@ -175,8 +185,8 @@ app.post('/send', async (req, res) => {
   }
 });
 
-app.listen(WA_API_PORT, () => {
-  console.log(`📡 WA send API running on http://localhost:${WA_API_PORT}`);
+app.listen(WA_API_PORT, WA_API_BIND_HOST, () => {
+  console.log(`📡 WA send API running on http://${WA_API_BIND_HOST}:${WA_API_PORT}`);
 });
 
 startWhatsApp();

@@ -179,6 +179,27 @@ cp kuun.config.example kuun.config
 ./kuun geminikey YOUR_API_KEY
 ```
 
+Set a strong bridge secret in `kuun.config` before starting:
+
+```bash
+BRIDGE_SECRET_KEY=<your-random-secret>
+```
+
+Example generator:
+
+```bash
+openssl rand -hex 32
+```
+
+Add your WhatsApp number to allowlist:
+
+```bash
+kuun add-number 38591...
+kuun users
+```
+
+Without allowed numbers, Kuun denies trigger execution by default.
+
 ## Start / Stop
 
 ```bash
@@ -240,7 +261,7 @@ Notes:
 
 Notes:
 - Numbers are stored in `allowed_numbers.txt`
-- If allowlist is empty, Kuun accepts triggers from any number
+- If allowlist is empty, Kuun denies all trigger execution
 - If allowlist has entries, only those numbers can trigger Kuun
 
 ## Commands
@@ -261,10 +282,12 @@ Notes:
 
 - `BOT_TRIGGER`
 - `GOOGLE_API_KEY`
+- `BRIDGE_SECRET_KEY` (required, must not be default)
 - `FASTAPI_PORT`
 - `WA_API_PORT`
+- `SERVER_BIND_HOST` (default `127.0.0.1`)
+- `WA_API_BIND_HOST` (default `127.0.0.1`)
 - `REMOTE_BRIDGE_URL`
-- `BRIDGE_SECRET_KEY`
 - `POLL_INTERVAL`
 - `HEARTBEAT_INTERVAL`
 - `SYSTEM_AWAKE`

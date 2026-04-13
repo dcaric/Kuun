@@ -34,7 +34,8 @@ async def root():
 
 
 @app.post("/webhook/message")
-async def handle_incoming_message(payload: dict):
+async def handle_incoming_message(payload: dict, authorization: Optional[str] = Header(None)):
+    verify_token(authorization)
     message_text = (payload.get("text") or "").strip()
     sender = payload.get("sender", "unknown")
     source = payload.get("source", "unknown")
@@ -87,7 +88,12 @@ async def status_update(payload: dict = Body(...), authorization: Optional[str] 
 
     if source == "whatsapp" and sender and message:
         try:
-            requests.post(f"http://localhost:{WA_API_PORT}/send", json={"to": sender, "text": message}, timeout=5)
+            requests.post(
+                f"http://localhost:{WA_API_PORT}/send",
+                json={"to": sender, "text": message},
+                headers={"Authorization": f"Bearer {BRIDGE_SECRET_KEY}"},
+                timeout=5,
+            )
         except Exception:
             pass
 
@@ -106,7 +112,12 @@ async def report_result(payload: dict = Body(...), authorization: Optional[str] 
 
     if source == "whatsapp" and sender:
         try:
-            requests.post(f"http://localhost:{WA_API_PORT}/send", json={"to": sender, "text": output}, timeout=5)
+            requests.post(
+                f"http://localhost:{WA_API_PORT}/send",
+                json={"to": sender, "text": output},
+                headers={"Authorization": f"Bearer {BRIDGE_SECRET_KEY}"},
+                timeout=5,
+            )
         except Exception:
             pass
 
@@ -117,4 +128,5 @@ if __name__ == "__main__":
     import uvicorn
 
     fastapi_port = int(os.getenv("FASTAPI_PORT", "8100"))
-    uvicorn.run(app, host="0.0.0.0", port=fastapi_port)
+    bind_host = os.getenv("SERVER_BIND_HOST", "127.0.0.1")
+    uvicorn.run(app, host=bind_host, port=fastapi_port)

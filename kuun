@@ -141,7 +141,7 @@ list_users() {
   echo "📱 Allowed numbers:"
 
   if [ ! -s "$ALLOWED_NUMBERS_FILE" ]; then
-    echo "(none - allowlist disabled; any trigger can be processed)"
+    echo "(none - deny by default; add at least one number with: kuun add-number <num>)"
     return
   fi
 
@@ -178,7 +178,18 @@ start() {
   BRIDGE_SERVER_URL="${BRIDGE_SERVER_URL:-${REMOTE_BRIDGE_URL}/webhook/message}"
 
   export BOT_TRIGGER="${BOT_TRIGGER:-kuun}"
-  export BRIDGE_SECRET_KEY="${BRIDGE_SECRET_KEY:-default-secret-key}"
+
+  # Security hard-stop: never run with default/empty bridge key.
+  if [ -z "${BRIDGE_SECRET_KEY:-}" ] || [ "${BRIDGE_SECRET_KEY}" = "default-secret-key" ] || [ "${BRIDGE_SECRET_KEY}" = "CHANGE_ME_STRONG_SECRET" ]; then
+    echo "❌ Refusing to start with insecure BRIDGE_SECRET_KEY."
+    echo "Set a strong value in $CONFIG_FILE, e.g.:"
+    echo "BRIDGE_SECRET_KEY=$(openssl rand -hex 32 2>/dev/null || echo CHANGE_ME_NOW)"
+    exit 1
+  fi
+  export BRIDGE_SECRET_KEY="${BRIDGE_SECRET_KEY}"
+
+  export SERVER_BIND_HOST="${SERVER_BIND_HOST:-127.0.0.1}"
+  export WA_API_BIND_HOST="${WA_API_BIND_HOST:-127.0.0.1}"
   export FASTAPI_PORT
   export WA_API_PORT
   export REMOTE_BRIDGE_URL
@@ -283,7 +294,9 @@ whatsapp() {
   BRIDGE_SERVER_URL="${BRIDGE_SERVER_URL:-${REMOTE_BRIDGE_URL}/webhook/message}"
 
   export BOT_TRIGGER="${BOT_TRIGGER:-kuun}"
-  export BRIDGE_SECRET_KEY="${BRIDGE_SECRET_KEY:-default-secret-key}"
+  export BRIDGE_SECRET_KEY="${BRIDGE_SECRET_KEY:-}"
+  export SERVER_BIND_HOST="${SERVER_BIND_HOST:-127.0.0.1}"
+  export WA_API_BIND_HOST="${WA_API_BIND_HOST:-127.0.0.1}"
   export FASTAPI_PORT
   export WA_API_PORT
   export REMOTE_BRIDGE_URL
