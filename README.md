@@ -175,7 +175,7 @@ Notes:
 macOS (zsh):
 
 ```bash
-echo 'export PATH="/Users/dcaric/Working/ml/Kuun:$PATH"' >> ~/.zshrc
+echo 'export PATH="$HOME/Kuun:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
