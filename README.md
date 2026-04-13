@@ -2,6 +2,9 @@
 
 Kuun is a minimal WhatsApp bridge for Gemini CLI.
 
+It is a lightweight fork/spinoff of Satele, focused only on the Gemini-bridge flow:
+- Satele repo: https://github.com/dcaric/Satele
+
 Main flow:
 1. You send: `<bot-name> - <question>` or `<bot-name> g <question>`
 2. Kuun starts Gemini CLI in the background
