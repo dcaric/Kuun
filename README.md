@@ -87,6 +87,78 @@ cd ~/Kuun
 ./kuun setup
 ```
 
+## Gemini CLI Setup (Required)
+
+Kuun sends your WhatsApp prompts to the local `gemini` CLI binary.
+So Gemini CLI must be installed and authenticated on the same machine where Kuun runs.
+
+### 1) Install Gemini CLI
+
+macOS (Homebrew):
+
+```bash
+brew install gemini-cli
+```
+
+Linux (npm global):
+
+```bash
+sudo npm install -g @google/gemini-cli
+```
+
+Verify:
+
+```bash
+which gemini
+gemini --version
+```
+
+### 2) Authenticate Gemini CLI
+
+Option A (OAuth login):
+
+```bash
+gemini auth login
+```
+
+Option B (API key):
+- Put your key in `kuun.config` via:
+
+```bash
+kuun geminikey YOUR_API_KEY
+```
+
+Kuun can work with either OAuth or API key.  
+If OAuth session expires, is revoked, or stops working, just run `gemini auth login` again.
+
+### 3) Quick Gemini CLI test before Kuun
+
+```bash
+gemini -y -p "Say hello from Gemini CLI"
+```
+
+If this command fails, Kuun background Gemini jobs will also fail.
+
+### 4) Typical auth/API troubleshooting
+
+- Check if OAuth is still valid:
+
+```bash
+gemini models list
+```
+
+- Re-login OAuth:
+
+```bash
+gemini auth login
+```
+
+- If using API key, confirm key exists in config:
+
+```bash
+rg '^GOOGLE_API_KEY=' kuun.config
+```
+
 ## First-Time Config
 
 ```bash
