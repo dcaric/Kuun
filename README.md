@@ -2,7 +2,7 @@
 
 Kuun is a minimal WhatsApp bridge for Gemini CLI.
 
-It is a lightweight fork/spinoff of Satele, focused only on the Gemini-bridge flow:
+It is a lightweight fork/spinoff of Satele, focused on the Gemini bridge flow:
 - Satele repo: https://github.com/dcaric/Satele
 
 Main flow:
@@ -12,281 +12,190 @@ Main flow:
 
 ## Major Strengths
 
-- **Practical Orchestrator**: Kuun is a lightweight orchestrator that enables simple, reliable communication between WhatsApp and Gemini CLI.
-- **Run Anywhere You Own**: Works on your home machine or on a cloud VPS, so you can keep the same WhatsApp workflow in both setups.
-- **Asynchronous by Design**: Long Gemini tasks run in the background and return results when complete, without blocking interaction.
-- **Autonomous Heartbeat + Scheduler**: Kuun can run periodic tasks and proactively inform you via WhatsApp, giving it real agent-like behavior.
-- **Easy to Extend**: Today it is optimized for Gemini CLI, but the architecture can be extended to other CLI agents like Codex and Claude Code.
-- **Operationally Simple**: Small codebase, focused scope, explicit ports, and CLI controls (`start/stop/restart/status`) make it easy to maintain.
+- **Practical orchestrator**: Simple, reliable communication between WhatsApp and Gemini CLI.
+- **Run anywhere you own**: Home machine or cloud VPS.
+- **Asynchronous by design**: Long Gemini tasks run in background.
+- **Autonomous heartbeat + scheduler**: Periodic tasks with proactive WhatsApp updates.
+- **Easy to extend**: Can be adapted for Codex CLI / Claude Code in future.
+- **Operationally simple**: Focused scope and clear CLI controls.
 
-## Platform Support
+## End-to-End Setup (All In One Place)
 
-- **macOS**: ✅ Fully supported in current setup
-- **Linux**: ✅ Mostly supported (same architecture, but not fully documented yet)
-- **Docker**: ⚠️ Not production-ready yet (no official Dockerfile/compose in Kuun repo at the moment)
+### 1) Install system prerequisites
 
-Note:
-- Kuun currently uses a pseudo-terminal wrapper for stable Gemini background execution.
-- If needed, Linux-specific tuning for that wrapper can be added quickly.
+macOS:
 
-## Linux Setup
+```bash
+brew install node python@3.11 gemini-cli
+```
 
-Install prerequisites (Ubuntu/Debian):
+Linux (Ubuntu/Debian):
 
 ```bash
 sudo apt update
 sudo apt install -y python3 python3-venv nodejs npm util-linux
+sudo npm install -g @google/gemini-cli
 ```
 
-Why `util-linux`:
-- Kuun uses the `script` command for stable Gemini background execution.
-
-Then setup Kuun:
+### 2) Clone and install Kuun dependencies
 
 ```bash
-cd /path/to/Kuun
-./kuun setup
-./kuun start
-./kuun status
-```
-
-## Linux systemd (Optional)
-
-Example unit file `/etc/systemd/system/kuun.service`:
-
-```ini
-[Unit]
-Description=Kuun WhatsApp Gemini Bridge
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-User=YOUR_USER
-WorkingDirectory=/path/to/Kuun
-ExecStart=/path/to/Kuun/kuun start
-ExecStop=/path/to/Kuun/kuun stop
-RemainAfterExit=yes
-TimeoutStartSec=120
-TimeoutStopSec=60
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable/start:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable kuun
-sudo systemctl start kuun
-sudo systemctl status kuun
-```
-
-## Ports (No Clash With Satele)
-
-Kuun defaults:
-- FastAPI: `8100`
-- WhatsApp Send API: `8101`
-
-Satele typically uses `8000`/`8001`, so they can run in parallel.
-
-## Installation
-
-```bash
-git clone <your-kuun-repo-url> ~/Kuun
+git clone https://github.com/dcaric/Kuun.git ~/Kuun
 cd ~/Kuun
 ./kuun setup
 ```
 
-## Gemini CLI Setup (Required)
-
-Kuun sends your WhatsApp prompts to the local `gemini` CLI binary.
-So Gemini CLI must be installed and authenticated on the same machine where Kuun runs.
-
-### 1) Install Gemini CLI
-
-macOS (Homebrew):
-
-```bash
-brew install gemini-cli
-```
-
-Linux (npm global):
-
-```bash
-sudo npm install -g @google/gemini-cli
-```
-
-Verify:
-
-```bash
-which gemini
-gemini --version
-```
-
-### 2) Authenticate Gemini CLI
-
-Option A (OAuth login):
-
-```bash
-gemini auth login
-```
-
-Option B (API key):
-- Put your key in `kuun.config` via:
-
-```bash
-kuun geminikey YOUR_API_KEY
-```
-
-Kuun can work with either OAuth or API key.  
-If OAuth session expires, is revoked, or stops working, just run `gemini auth login` again.
-
-### 3) Quick Gemini CLI test before Kuun
-
-```bash
-gemini -y -p "Say hello from Gemini CLI"
-```
-
-If this command fails, Kuun background Gemini jobs will also fail.
-
-### 4) Typical auth/API troubleshooting
-
-- Check if OAuth is still valid:
-
-```bash
-gemini models list
-```
-
-- Re-login OAuth:
-
-```bash
-gemini auth login
-```
-
-- If using API key, confirm key exists in config:
-
-```bash
-rg '^GOOGLE_API_KEY=' kuun.config
-```
-
-## First-Time Config
+### 3) Create and edit `kuun.config`
 
 ```bash
 cp kuun.config.example kuun.config
-./kuun name m1
-./kuun geminikey YOUR_API_KEY
 ```
 
-Set a strong bridge secret in `kuun.config` before starting:
+Required values in `kuun.config`:
 
-```bash
-BRIDGE_SECRET_KEY=<your-random-secret>
+```env
+BOT_TRIGGER=m1
+BRIDGE_SECRET_KEY=<strong_random_secret>
+GOOGLE_API_KEY=<optional_if_you_use_api_key_mode>
+FASTAPI_PORT=8100
+WA_API_PORT=8101
+SERVER_BIND_HOST=127.0.0.1
+WA_API_BIND_HOST=127.0.0.1
+REMOTE_BRIDGE_URL=http://localhost:8100
+POLL_INTERVAL=2
+HEARTBEAT_INTERVAL=30
 ```
 
-Example generator:
+Generate a secure bridge secret:
 
 ```bash
 openssl rand -hex 32
 ```
 
-Add your WhatsApp number to allowlist:
+### 4) Configure bot name and optional Gemini API key
+
+```bash
+kuun name m1
+kuun geminikey YOUR_API_KEY   # optional if you use OAuth login
+```
+
+### 5) Authenticate Gemini CLI (required)
+
+OAuth login:
+
+```bash
+gemini auth login
+```
+
+Verify Gemini CLI is usable:
+
+```bash
+gemini --version
+gemini -y -p "Say hello from Gemini CLI"
+```
+
+If OAuth expires later, run `gemini auth login` again.
+
+### 6) Add allowed WhatsApp number(s)
 
 ```bash
 kuun add-number 38591...
 kuun users
 ```
 
-Without allowed numbers, Kuun denies trigger execution by default.
+Important:
+- Kuun uses deny-by-default allowlist behavior.
+- If no numbers are allowed, trigger execution is blocked.
 
-## Start / Stop
+### 7) Start Kuun services
 
 ```bash
-./kuun start
-./kuun status
-./kuun stop
-./kuun restart
+kuun start
+kuun status
 ```
 
-## Use `kuun` Instead of `./kuun`
+Expected running services:
+- FastAPI
+- WhatsApp Bridge
+- AI Monitor
+- Heartbeat
 
-By default, shell runs `./kuun` because the project folder is not in `PATH`.
-Add Kuun to PATH once, then you can use plain `kuun` command.
+### 8) Link WhatsApp (QR)
 
-On macOS (zsh):
+```bash
+kuun whatsapp link
+```
+
+Scan QR in WhatsApp -> Linked Devices.
+
+### 9) First WhatsApp test
+
+Send from WhatsApp:
+- `m1 help`
+- `m1 - what time is it in Zagreb?`
+
+## Daily Usage
+
+```bash
+kuun start
+kuun stop
+kuun restart
+kuun status
+```
+
+WhatsApp examples:
+- `m1 - summarize latest AI trends`
+- `m1 g explain docker volumes simply`
+- `m1 status`
+- `m1 help`
+
+## Scheduler (WhatsApp)
+
+- `m1 set job which will at 13h check weather in Split`
+- `m1 list jobs`
+- `m1 remove the scheduled job with ID abc12345`
+
+Notes:
+- Scheduled jobs are stored in `brain/scheduled_jobs.json`.
+- Jobs run daily at configured time and send results to the same sender.
+
+## Whitelist Commands
+
+- `kuun add-number <num>`
+- `kuun remove-number <num>`
+- `kuun users`
+
+## Make `kuun` global command (optional)
+
+macOS (zsh):
 
 ```bash
 echo 'export PATH="/Users/dcaric/Working/ml/Kuun:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-After that:
+## Platform Notes
 
-```bash
-kuun start
-kuun status
-kuun restart
-```
+- **macOS**: supported
+- **Linux**: supported (with prerequisites above)
+- **Docker**: not production-ready yet in this repo
 
-## WhatsApp Linking
+## Security Notes
 
-```bash
-kuun whatsapp link
-```
-
-Scan QR code in terminal (Linked Devices in WhatsApp).
-
-## WhatsApp Usage
-
-Examples:
-- `m1 - what is the capital of Croatia?`
-- `m1 g summarize this text: ...`
-
-## Scheduler (WhatsApp)
-
-- `m1 set job which will at 13h check weather in Split`
-- `m1 list all scheduled jobs`
-- `m1 remove the scheduled job with ID abc12345`
-
-Notes:
-- Scheduled jobs are stored in `brain/scheduled_jobs.json`
-- Jobs run daily at configured time and send results back to the same WhatsApp sender
-
-## Whitelist Numbers
-
-- `kuun add-number <num>`
-- `kuun remove-number <num>`
-- `kuun users`
-
-Notes:
-- Numbers are stored in `allowed_numbers.txt`
-- If allowlist is empty, Kuun denies all trigger execution
-- If allowlist has entries, only those numbers can trigger Kuun
-
-## Commands
-
-- `kuun setup`
-- `kuun start`
-- `kuun stop`
-- `kuun restart`
-- `kuun status`
-- `kuun name <name>`
-- `kuun geminikey <key>`
-- `kuun add-number <num>`
-- `kuun remove-number <num>`
-- `kuun users`
-- `kuun whatsapp link`
+- `BRIDGE_SECRET_KEY` is required and must not be default.
+- Internal APIs are authenticated.
+- Services bind to localhost by default.
+- Runtime/session files are ignored via `.gitignore`.
 
 ## Config Keys (`kuun.config`)
 
 - `BOT_TRIGGER`
+- `BRIDGE_SECRET_KEY`
 - `GOOGLE_API_KEY`
-- `BRIDGE_SECRET_KEY` (required, must not be default)
 - `FASTAPI_PORT`
 - `WA_API_PORT`
-- `SERVER_BIND_HOST` (default `127.0.0.1`)
-- `WA_API_BIND_HOST` (default `127.0.0.1`)
+- `SERVER_BIND_HOST`
+- `WA_API_BIND_HOST`
 - `REMOTE_BRIDGE_URL`
 - `POLL_INTERVAL`
 - `HEARTBEAT_INTERVAL`
