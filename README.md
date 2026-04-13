@@ -10,6 +10,15 @@ Main flow:
 2. Kuun starts Gemini CLI in the background
 3. Kuun sends final output back to your WhatsApp
 
+## Major Strengths
+
+- **Practical Orchestrator**: Kuun is a lightweight orchestrator that enables simple, reliable communication between WhatsApp and Gemini CLI.
+- **Run Anywhere You Own**: Works on your home machine or on a cloud VPS, so you can keep the same WhatsApp workflow in both setups.
+- **Asynchronous by Design**: Long Gemini tasks run in the background and return results when complete, without blocking interaction.
+- **Autonomous Heartbeat + Scheduler**: Kuun can run periodic tasks and proactively inform you via WhatsApp, giving it real agent-like behavior.
+- **Easy to Extend**: Today it is optimized for Gemini CLI, but the architecture can be extended to other CLI agents like Codex and Claude Code.
+- **Operationally Simple**: Small codebase, focused scope, explicit ports, and CLI controls (`start/stop/restart/status`) make it easy to maintain.
+
 ## Platform Support
 
 - **macOS**: ✅ Fully supported in current setup
