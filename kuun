@@ -1,0 +1,385 @@
+#!/bin/bash
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+BASE_DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+
+export LOG_FILE="$BASE_DIR/kuun.log"
+touch "$LOG_FILE" 2>/dev/null || export LOG_FILE="/tmp/kuun_$(whoami).log"
+
+CONFIG_FILE="$BASE_DIR/kuun.config"
+EXAMPLE_FILE="$BASE_DIR/kuun.config.example"
+ALLOWED_NUMBERS_FILE="$BASE_DIR/allowed_numbers.txt"
+
+ensure_killed() {
+  local pattern=$1
+  local name=$2
+  if pgrep -f "$pattern" >/dev/null; then
+    echo "⏳ Stopping $name..."
+    pkill -f "$pattern" >/dev/null 2>&1
+
+    # Wait up to 5 seconds for graceful exit.
+    for _ in {1..10}; do
+      if ! pgrep -f "$pattern" >/dev/null; then
+        return 0
+      fi
+      sleep 0.5
+    done
+
+    # Force kill if still alive.
+    pkill -9 -f "$pattern" >/dev/null 2>&1
+
+    # Final short wait.
+    for _ in {1..10}; do
+      if ! pgrep -f "$pattern" >/dev/null; then
+        return 0
+      fi
+      sleep 0.2
+    done
+  fi
+}
+
+ensure_config() {
+  if [ ! -f "$CONFIG_FILE" ]; then
+    cp "$EXAMPLE_FILE" "$CONFIG_FILE"
+  fi
+}
+
+ensure_allowed_numbers_file() {
+  if [ ! -f "$ALLOWED_NUMBERS_FILE" ]; then
+    touch "$ALLOWED_NUMBERS_FILE"
+  fi
+}
+
+load_config() {
+  ensure_config
+  set -a
+  source "$CONFIG_FILE" 2>/dev/null || true
+  set +a
+}
+
+update_config() {
+  local key="$1"
+  local val="$2"
+  ensure_config
+  if grep -q "^${key}=" "$CONFIG_FILE"; then
+    sed -i.bak "s|^${key}=.*|${key}=${val}|" "$CONFIG_FILE"
+  else
+    echo "${key}=${val}" >> "$CONFIG_FILE"
+  fi
+  rm -f "$CONFIG_FILE.bak"
+}
+
+normalize_number() {
+  local raw="$1"
+  local num=""
+
+  raw="${raw%@*}"
+  num="$(echo "$raw" | tr -cd '0-9')"
+
+  echo "$num"
+}
+
+add_number() {
+  local raw="$1"
+  local num
+
+  if [ -z "$raw" ]; then
+    echo "Usage: kuun add-number <num>"
+    exit 1
+  fi
+
+  ensure_allowed_numbers_file
+  num="$(normalize_number "$raw")"
+
+  if [ -z "$num" ]; then
+    echo "❌ Invalid number: $raw"
+    exit 1
+  fi
+
+  if grep -qx "$num" "$ALLOWED_NUMBERS_FILE"; then
+    echo "ℹ️ Number already allowed: $num"
+    exit 0
+  fi
+
+  echo "$num" >> "$ALLOWED_NUMBERS_FILE"
+  echo "✅ Added allowed number: $num"
+}
+
+remove_number() {
+  local raw="$1"
+  local num
+
+  if [ -z "$raw" ]; then
+    echo "Usage: kuun remove-number <num>"
+    exit 1
+  fi
+
+  ensure_allowed_numbers_file
+  num="$(normalize_number "$raw")"
+
+  if [ -z "$num" ]; then
+    echo "❌ Invalid number: $raw"
+    exit 1
+  fi
+
+  if ! grep -qx "$num" "$ALLOWED_NUMBERS_FILE"; then
+    echo "ℹ️ Number not in allowlist: $num"
+    exit 0
+  fi
+
+  grep -vx "$num" "$ALLOWED_NUMBERS_FILE" > "$ALLOWED_NUMBERS_FILE.tmp" && mv "$ALLOWED_NUMBERS_FILE.tmp" "$ALLOWED_NUMBERS_FILE"
+  echo "✅ Removed allowed number: $num"
+}
+
+list_users() {
+  ensure_allowed_numbers_file
+  echo "📱 Allowed numbers:"
+
+  if [ ! -s "$ALLOWED_NUMBERS_FILE" ]; then
+    echo "(none - deny by default; add at least one number with: kuun add-number <num>)"
+    return
+  fi
+
+  nl -w1 -s'. ' "$ALLOWED_NUMBERS_FILE"
+}
+
+setup() {
+  cd "$BASE_DIR" || exit 1
+  echo "📦 Installing Python dependencies..."
+  python3 -m venv venv
+  ./venv/bin/pip install -r requirements.txt
+
+  echo "📦 Installing Node dependencies..."
+  npm install
+
+  ensure_allowed_numbers_file
+
+  echo "✅ Setup complete"
+}
+
+start() {
+  cd "$BASE_DIR" || exit 1
+  load_config
+  ensure_allowed_numbers_file
+
+  PYTHON_CMD="$BASE_DIR/venv/bin/python3"
+  if [ ! -x "$PYTHON_CMD" ]; then
+    PYTHON_CMD="python3"
+  fi
+
+  FASTAPI_PORT="${FASTAPI_PORT:-8100}"
+  WA_API_PORT="${WA_API_PORT:-8101}"
+  REMOTE_BRIDGE_URL="${REMOTE_BRIDGE_URL:-http://localhost:${FASTAPI_PORT}}"
+  BRIDGE_SERVER_URL="${BRIDGE_SERVER_URL:-${REMOTE_BRIDGE_URL}/webhook/message}"
+
+  export BOT_TRIGGER="${BOT_TRIGGER:-kuun}"
+
+  # Security hard-stop: never run with default/empty bridge key.
+  if [ -z "${BRIDGE_SECRET_KEY:-}" ] || [ "${BRIDGE_SECRET_KEY}" = "default-secret-key" ] || [ "${BRIDGE_SECRET_KEY}" = "CHANGE_ME_STRONG_SECRET" ]; then
+    echo "❌ Refusing to start with insecure BRIDGE_SECRET_KEY."
+    echo "Set a strong value in $CONFIG_FILE, e.g.:"
+    echo "BRIDGE_SECRET_KEY=$(openssl rand -hex 32 2>/dev/null || echo CHANGE_ME_NOW)"
+    exit 1
+  fi
+  export BRIDGE_SECRET_KEY="${BRIDGE_SECRET_KEY}"
+
+  export SERVER_BIND_HOST="${SERVER_BIND_HOST:-127.0.0.1}"
+  export WA_API_BIND_HOST="${WA_API_BIND_HOST:-127.0.0.1}"
+  export FASTAPI_PORT
+  export WA_API_PORT
+  export REMOTE_BRIDGE_URL
+  export BRIDGE_SERVER_URL
+  export POLL_INTERVAL="${POLL_INTERVAL:-2}"
+  export HEARTBEAT_INTERVAL="${HEARTBEAT_INTERVAL:-30}"
+
+  ensure_killed "server/main.py" "FastAPI"
+  ensure_killed "whatsapp_bridge.mjs" "WhatsApp Bridge"
+  ensure_killed "brain/monitor.py" "AI Monitor"
+  ensure_killed "brain/heartbeat.py" "Heartbeat"
+
+  nohup "$PYTHON_CMD" server/main.py >> "$LOG_FILE" 2>&1 &
+  nohup node whatsapp_bridge.mjs >> "$LOG_FILE" 2>&1 &
+  nohup "$PYTHON_CMD" brain/monitor.py >> "$LOG_FILE" 2>&1 &
+  nohup "$PYTHON_CMD" brain/heartbeat.py >> "$LOG_FILE" 2>&1 &
+
+  if [ "${SYSTEM_AWAKE:-false}" = "true" ]; then
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      if ! pgrep -f "caffeinate -disu" >/dev/null; then
+        nohup caffeinate -disu sleep infinity >/dev/null 2>&1 &
+      fi
+    fi
+  fi
+
+  echo "✅ Kuun started"
+  echo "🔌 FastAPI: http://localhost:${FASTAPI_PORT}"
+  echo "🔌 WA Send API: http://localhost:${WA_API_PORT}"
+  echo "📄 Logs: tail -f $LOG_FILE"
+}
+
+stop() {
+  ensure_killed "server/main.py" "FastAPI"
+  ensure_killed "whatsapp_bridge.mjs" "WhatsApp Bridge"
+  ensure_killed "brain/monitor.py" "AI Monitor"
+  ensure_killed "brain/heartbeat.py" "Heartbeat"
+  echo "✅ Kuun stopped"
+}
+
+restart() {
+  local KUUN_EXE="$BASE_DIR/kuun"
+  "$KUUN_EXE" stop
+  sleep 1
+  "$KUUN_EXE" start
+}
+
+is_running() {
+  pgrep -f "$1" >/dev/null
+}
+
+status() {
+  load_config
+  FASTAPI_PORT="${FASTAPI_PORT:-8100}"
+  WA_API_PORT="${WA_API_PORT:-8101}"
+
+  echo "📊 *System Status:*"
+  echo "📊 Kuun Status:"
+
+  if is_running "server/main.py"; then
+    echo "🔹 FastAPI: RUNNING (port ${FASTAPI_PORT})"
+  else
+    echo "🔹 FastAPI: OFFLINE (port ${FASTAPI_PORT})"
+  fi
+
+  if is_running "whatsapp_bridge.mjs"; then
+    echo "🔹 WhatsApp Bridge: RUNNING (port ${WA_API_PORT})"
+  else
+    echo "🔹 WhatsApp Bridge: OFFLINE (port ${WA_API_PORT})"
+  fi
+
+  if is_running "brain/monitor.py"; then
+    echo "🔹 AI Monitor: RUNNING (Poll: ${POLL_INTERVAL:-2}s)"
+  else
+    echo "🔹 AI Monitor: OFFLINE"
+  fi
+
+  if is_running "brain/heartbeat.py"; then
+    echo "🔹 Heartbeat: RUNNING (${HEARTBEAT_INTERVAL:-30}s interval)"
+  else
+    echo "🔹 Heartbeat: OFFLINE"
+  fi
+
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    if pgrep -f "caffeinate -disu" >/dev/null; then
+      echo "🔹 Power: AWAKE (Continuous Mode)"
+    else
+      echo "🔹 Power: NORMAL"
+    fi
+  else
+    echo "🔹 Power: NORMAL"
+  fi
+}
+
+whatsapp() {
+  cd "$BASE_DIR" || exit 1
+  load_config
+  ensure_allowed_numbers_file
+
+  FASTAPI_PORT="${FASTAPI_PORT:-8100}"
+  WA_API_PORT="${WA_API_PORT:-8101}"
+  REMOTE_BRIDGE_URL="${REMOTE_BRIDGE_URL:-http://localhost:${FASTAPI_PORT}}"
+  BRIDGE_SERVER_URL="${BRIDGE_SERVER_URL:-${REMOTE_BRIDGE_URL}/webhook/message}"
+
+  export BOT_TRIGGER="${BOT_TRIGGER:-kuun}"
+  export BRIDGE_SECRET_KEY="${BRIDGE_SECRET_KEY:-}"
+  export SERVER_BIND_HOST="${SERVER_BIND_HOST:-127.0.0.1}"
+  export WA_API_BIND_HOST="${WA_API_BIND_HOST:-127.0.0.1}"
+  export FASTAPI_PORT
+  export WA_API_PORT
+  export REMOTE_BRIDGE_URL
+  export BRIDGE_SERVER_URL
+
+  node whatsapp_bridge.mjs
+}
+
+help_cmd() {
+  echo "Kuun CLI"
+  echo "Usage: kuun <command>"
+  echo ""
+  echo "Commands:"
+  echo "  setup               Install dependencies"
+  echo "  start               Start services"
+  echo "  stop                Stop services"
+  echo "  restart             Restart services"
+  echo "  status              Show service status"
+  echo "  name <name>         Set bot trigger name"
+  echo "  geminikey <key>     Set GOOGLE_API_KEY in config"
+  echo "  add-number <num>    Whitelist a number (e.g. 38591...)"
+  echo "  remove-number <n>   Remove number from whitelist"
+  echo "  users               Show allowed numbers"
+  echo "  whatsapp            Run WhatsApp bridge in foreground"
+  echo "  whatsapp link       Launch WhatsApp linking process (QR code)"
+  echo "  help                Show this message"
+}
+
+case "$1" in
+  setup)
+    setup
+    ;;
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  restart)
+    restart
+    ;;
+  status)
+    status
+    ;;
+  name)
+    if [ -z "$2" ]; then
+      echo "Usage: kuun name <name>"
+      exit 1
+    fi
+    update_config "BOT_TRIGGER" "$2"
+    echo "✅ BOT_TRIGGER set to: $2"
+    ;;
+  geminikey)
+    if [ -z "$2" ]; then
+      echo "Usage: kuun geminikey <key>"
+      exit 1
+    fi
+    update_config "GOOGLE_API_KEY" "$2"
+    echo "✅ GOOGLE_API_KEY saved"
+    ;;
+  add-number)
+    add_number "$2"
+    ;;
+  remove-number)
+    remove_number "$2"
+    ;;
+  users)
+    list_users
+    ;;
+  whatsapp)
+    if [ "$2" = "link" ] || [ -z "$2" ]; then
+      whatsapp
+    else
+      echo "Usage: kuun whatsapp [link]"
+      exit 1
+    fi
+    ;;
+  help|--help|-h|"")
+    help_cmd
+    ;;
+  *)
+    echo "Unknown command: $1"
+    help_cmd
+    exit 1
+    ;;
+esac

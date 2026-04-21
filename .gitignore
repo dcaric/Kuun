@@ -1,0 +1,11 @@
+.kuun_cache/
+venv/
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.log
+kuun.config
+allowed_numbers.txt
+media/
+brain/scheduled_jobs.json
