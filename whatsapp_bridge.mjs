@@ -45,6 +45,27 @@ function textFromMsg(msg) {
   return '';
 }
 
+function isGroupJid(jid) {
+  return typeof jid === 'string' && jid.endsWith('@g.us');
+}
+
+function normalizeJidUser(jid = '') {
+  return String(jid).split('@')[0].split(':')[0];
+}
+
+function isReplyToBotMessage(msg, sock) {
+  const ext = msg?.message?.extendedTextMessage;
+  const ctx = ext?.contextInfo;
+  if (!ctx) return false;
+
+  // When available, participant points to the author of the quoted message.
+  const quotedParticipant = normalizeJidUser(ctx.participant || '');
+  const botUser = normalizeJidUser(sock?.user?.id || '');
+  if (quotedParticipant && botUser && quotedParticipant === botUser) return true;
+
+  return false;
+}
+
 function loadAllowedNumbers() {
   try {
     if (!fs.existsSync(ALLOWED_NUMBERS_FILE)) {
@@ -139,12 +160,18 @@ async function startWhatsApp() {
       const triggerRegex = new RegExp(`\\b${BOT_TRIGGER}\\b`, 'i');
       const isTriggered = triggerRegex.test(text);
       const isBotLike = text.startsWith('🤖') || text.startsWith('♊') || text.startsWith('📊');
+      const isGroup = isGroupJid(jid);
+      const isReplyToMe = isReplyToBotMessage(msg, sock);
       const allowlist = loadAllowedNumbers();
       const trustedSender = fromMe || isTrustedSender(jid, senderName, allowlist);
       const isRecentOutboundEcho = fromMe && isBotLike;
       const allowSelfConversation = false;
 
       if (fromMe && !allowSelfConversation && (!isTriggered || isRecentOutboundEcho)) continue;
+      if (isGroup && !isReplyToMe) {
+        console.log(`👥 Ignoring group message without direct reply from ${senderName}`);
+        continue;
+      }
 
       const finalTriggered = trustedSender && isTriggered;
       const taskMode = finalTriggered ? 'agent' : (trustedSender ? 'trusted_chat' : 'public_chat');
