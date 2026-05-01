@@ -320,6 +320,9 @@ help_cmd() {
   echo "  add-number <num>    Whitelist a number (e.g. 38591...)"
   echo "  remove-number <n>   Remove number from whitelist"
   echo "  users               Show allowed numbers"
+  echo "  whitelist add <n>   Ignore a contact name/identifier in conversational mode"
+  echo "  whitelist remove <n> Remove a contact from ignore list"
+  echo "  whitelist           Show ignored contacts"
   echo "  whatsapp            Run WhatsApp bridge in foreground"
   echo "  whatsapp link       Launch WhatsApp linking process (QR code)"
   echo "  help                Show this message"
@@ -365,6 +368,15 @@ case "$1" in
     ;;
   users)
     list_users
+    ;;
+  whitelist)
+    if [ "$2" = "add" ] && [ -n "$3" ]; then
+      echo "Use via WhatsApp: ${BOT_TRIGGER:-kuun} whitelist add $3"
+    elif [ "$2" = "remove" ] && [ -n "$3" ]; then
+      echo "Use via WhatsApp: ${BOT_TRIGGER:-kuun} whitelist remove $3"
+    else
+      echo "Use via WhatsApp: ${BOT_TRIGGER:-kuun} whitelist"
+    fi
     ;;
   whatsapp)
     if [ "$2" = "link" ] || [ -z "$2" ]; then

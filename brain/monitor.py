@@ -24,6 +24,7 @@ if POLL_INTERVAL < 0.5:
 JOBS_FILE = PROJECT_ROOT / "brain" / "scheduled_jobs.json"
 KUUN_CLI = PROJECT_ROOT / "kuun"
 ACTIVE_GEMINI_JOBS = {}
+IGNORED_CONTACTS_FILE = PROJECT_ROOT / "ignored_contacts.json"
 
 
 def report_status(task_id: str, message: str):
@@ -48,6 +49,84 @@ def report_result(task_id: str, output: str):
         )
     except Exception:
         pass
+
+
+def load_ignored_contacts() -> list[str]:
+    if not IGNORED_CONTACTS_FILE.exists():
+        return []
+    try:
+        data = json.loads(IGNORED_CONTACTS_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return [str(x) for x in data if str(x).strip()]
+    except Exception:
+        pass
+    return []
+
+
+def save_ignored_contacts(items: list[str]):
+    IGNORED_CONTACTS_FILE.write_text(json.dumps(items, indent=2), encoding="utf-8")
+
+
+def should_ignore_contact(push_name: str, sender_jid: str) -> bool:
+    entries = load_ignored_contacts()
+    if not entries:
+        return False
+    push_lower = (push_name or "").lower()
+    sender_lower = (sender_jid or "").lower()
+    for item in entries:
+        i = item.lower().strip()
+        if not i:
+            continue
+        if i in push_lower or i in sender_lower:
+            return True
+    return False
+
+
+def safe_conversational_reply(instruction: str, mode: str) -> str:
+    text = (instruction or "").strip()
+    if not text:
+        return "I'm Kuun, Dario's agent - Dario will reply soon."
+
+    lowered = text.lower()
+    if any(p in lowered for p in ["tko si", "ko si", "who are you", "what are you"]):
+        return "I'm Kuun, Dario's agent - here to help with messages and tasks. 🤖 [Kuun]"
+    if any(p in lowered for p in ["kava", "coffee"]):
+        return "I'm Kuun, Dario's agent - coffee sounds like a solid plan, I'll pass it on. 🤖 [Kuun]"
+    if "status" in lowered and mode == "trusted_chat":
+        return "I'm Kuun, Dario's agent - all good here, I forwarded your message context. 🤖 [Kuun]"
+
+    codex_mode = "trusted_reply" if mode == "trusted_chat" else "public_reply"
+    codex_out = codex_restricted_reply(text, mode=codex_mode)
+    if not codex_out:
+        codex_out = "Dario will reply soon."
+    prefix = "I'm Kuun, Dario's agent -"
+    if codex_out.startswith(prefix):
+        return codex_out
+    return f"{prefix} {codex_out}"
+
+
+def codex_restricted_reply(instruction: str, mode: str = "public_reply") -> str:
+    query = (instruction or "").strip()
+    if not query:
+        return "Dario will reply soon."
+
+    script_path = PROJECT_ROOT / "brain" / "ask_codex.py"
+    py = "python3"
+    try:
+        proc = subprocess.run(
+            [py, str(script_path), query, "--mode", mode],
+            capture_output=True,
+            text=True,
+            timeout=50,
+            stdin=subprocess.DEVNULL,
+            cwd=str(PROJECT_ROOT),
+        )
+        out = (proc.stdout or "").strip() or (proc.stderr or "").strip()
+        if not out or out.startswith("Error:"):
+            return "Dario will reply soon."
+        return out
+    except Exception:
+        return "Dario will reply soon."
 
 
 def load_jobs() -> list[dict]:
@@ -121,6 +200,10 @@ def build_help_message() -> str:
         f"• `{BOT_TRIGGER} status`\n"
         f"• `{BOT_TRIGGER} help`\n"
         f"• `{BOT_TRIGGER} restart`\n\n"
+        "🛑 CONVERSATION IGNORE LIST (WHATSAPP)\n"
+        f"• `{BOT_TRIGGER} whitelist add <name>`\n"
+        f"• `{BOT_TRIGGER} whitelist remove <name>`\n"
+        f"• `{BOT_TRIGGER} whitelist`\n\n"
         "🔒 WHITELIST (CLI)\n"
         "• `kuun add-number <num>`\n"
         "• `kuun remove-number <num>`\n"
@@ -239,7 +322,51 @@ def process_task(task: dict):
     instruction = (task.get("instruction") or "").strip()
     instruction_lower = instruction.lower()
     sender = task.get("sender", "")
+    push_name = (task.get("pushName") or "").strip()
+    task_mode = (task.get("mode") or "agent").strip()
     query = parse_gemini_query(instruction)
+
+    if instruction_lower.startswith("whitelist add "):
+        name_to_add = instruction[14:].strip()
+        if not name_to_add:
+            report_result(task_id, "⚠️ Usage: whitelist add <name>")
+            return
+        items = load_ignored_contacts()
+        if name_to_add not in items:
+            items.append(name_to_add)
+            save_ignored_contacts(items)
+        report_result(task_id, f"✅ Added '{name_to_add}' to the ignore list.")
+        return
+
+    if instruction_lower.startswith("whitelist remove "):
+        name_to_remove = instruction[17:].strip()
+        if not name_to_remove:
+            report_result(task_id, "⚠️ Usage: whitelist remove <name>")
+            return
+        items = load_ignored_contacts()
+        lowered = [x.lower() for x in items]
+        if name_to_remove.lower() in lowered:
+            idx = lowered.index(name_to_remove.lower())
+            removed = items.pop(idx)
+            save_ignored_contacts(items)
+            report_result(task_id, f"✅ Removed '{removed}' from the ignore list.")
+        else:
+            report_result(task_id, f"⚠️ '{name_to_remove}' not found in ignore list.")
+        return
+
+    if instruction_lower == "whitelist":
+        items = load_ignored_contacts()
+        if items:
+            report_result(task_id, "🛑 *Ignored Contacts (Whitelist)*\n" + "\n".join(f"- {x}" for x in items))
+        else:
+            report_result(task_id, "🛑 Ignore list is empty.")
+        return
+
+    if task_mode in {"public_chat", "trusted_chat"}:
+        if should_ignore_contact(push_name, sender):
+            return
+        report_result(task_id, safe_conversational_reply(instruction, task_mode))
+        return
 
     if query:
         report_status(task_id, "♊ GeminiCLI job started in background. I will send the result when it finishes.")

@@ -20,6 +20,12 @@ const BOT_TRIGGER = (process.env.BOT_TRIGGER || 'kuun').trim();
 const BRIDGE_SECRET_KEY = process.env.BRIDGE_SECRET_KEY || '';
 const AUTH_DIR = path.resolve(__dirname, '.kuun_cache');
 const ALLOWED_NUMBERS_FILE = path.resolve(__dirname, 'allowed_numbers.txt');
+const TRUSTED_NAMES = new Set(
+  (process.env.TRUSTED_NAMES || 'Dario,Dario Caric')
+    .split(',')
+    .map((n) => n.trim().toLowerCase())
+    .filter(Boolean)
+);
 
 const logger = pino({ level: 'silent' });
 
@@ -76,6 +82,11 @@ function isAllowedSender(jid, allowlist) {
   return allowlist.has(exact) || allowlist.has(bare) || allowlist.has(bareDigits);
 }
 
+function isTrustedSender(jid, pushName, allowlist) {
+  const normalizedName = String(pushName || '').trim().toLowerCase();
+  return isAllowedSender(jid, allowlist) || (!!normalizedName && TRUSTED_NAMES.has(normalizedName));
+}
+
 async function startWhatsApp() {
   console.log(`🚀 Starting WhatsApp bridge (trigger: ${BOT_TRIGGER})`);
 
@@ -120,6 +131,7 @@ async function startWhatsApp() {
 
       const jid = msg.key?.remoteJid;
       const fromMe = !!msg.key?.fromMe;
+      const senderName = msg.pushName || (fromMe ? 'Kuun Owner' : (jid || '').split('@')[0]);
       const text = (textFromMsg(msg) || '').trim();
 
       if (!jid || !text) continue;
@@ -127,31 +139,33 @@ async function startWhatsApp() {
       const triggerRegex = new RegExp(`\\b${BOT_TRIGGER}\\b`, 'i');
       const isTriggered = triggerRegex.test(text);
       const isBotLike = text.startsWith('🤖') || text.startsWith('♊') || text.startsWith('📊');
+      const allowlist = loadAllowedNumbers();
+      const trustedSender = fromMe || isTrustedSender(jid, senderName, allowlist);
+      const isRecentOutboundEcho = fromMe && isBotLike;
+      const allowSelfConversation = false;
 
-      if (fromMe && (!isTriggered || isBotLike)) continue;
-      if (!isTriggered) continue;
+      if (fromMe && !allowSelfConversation && (!isTriggered || isRecentOutboundEcho)) continue;
 
-      // Enforce allowlist for external senders.
-      if (!fromMe) {
-        const allowlist = loadAllowedNumbers();
-        if (!isAllowedSender(jid, allowlist)) {
-          console.log(`🚫 Ignored non-whitelisted sender: ${jid}`);
-          continue;
-        }
-      }
+      const finalTriggered = trustedSender && isTriggered;
+      const taskMode = finalTriggered ? 'agent' : (trustedSender ? 'trusted_chat' : 'public_chat');
 
       try {
         await axios.post(SERVER_URL, {
           text,
           sender: jid,
+          pushName: senderName,
           source: 'whatsapp',
+          fromMe,
+          mode: taskMode,
         }, {
           headers: { Authorization: `Bearer ${BRIDGE_SECRET_KEY}` },
         });
 
-        await sock.sendMessage(jid, {
-          text: `🤖 [${BOT_TRIGGER}] Working...`,
-        });
+        if (finalTriggered) {
+          await sock.sendMessage(jid, {
+            text: `🤖 [${BOT_TRIGGER}] Working...`,
+          });
+        }
       } catch (err) {
         console.error('❌ Forward failed:', err.message);
       }

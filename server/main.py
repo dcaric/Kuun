@@ -58,7 +58,9 @@ async def handle_incoming_message(payload: dict, authorization: Optional[str] = 
         "id": task_id,
         "instruction": instruction,
         "sender": sender,
+        "pushName": payload.get("pushName", ""),
         "source": source,
+        "mode": payload.get("mode", "agent"),
         "status": "pending",
     }
     tasks_queue.append(task)
