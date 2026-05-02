@@ -24,7 +24,7 @@ if POLL_INTERVAL < 0.5:
 JOBS_FILE = PROJECT_ROOT / "brain" / "scheduled_jobs.json"
 KUUN_CLI = PROJECT_ROOT / "kuun"
 ACTIVE_GEMINI_JOBS = {}
-IGNORED_CONTACTS_FILE = PROJECT_ROOT / "ignored_contacts.json"
+WHITELIST_FILE = PROJECT_ROOT / "whitelist.json"
 
 
 def report_status(task_id: str, message: str):
@@ -51,11 +51,11 @@ def report_result(task_id: str, output: str):
         pass
 
 
-def load_ignored_contacts() -> list[str]:
-    if not IGNORED_CONTACTS_FILE.exists():
+def load_whitelist() -> list[str]:
+    if not WHITELIST_FILE.exists():
         return []
     try:
-        data = json.loads(IGNORED_CONTACTS_FILE.read_text(encoding="utf-8"))
+        data = json.loads(WHITELIST_FILE.read_text(encoding="utf-8"))
         if isinstance(data, list):
             return [str(x) for x in data if str(x).strip()]
     except Exception:
@@ -63,14 +63,16 @@ def load_ignored_contacts() -> list[str]:
     return []
 
 
-def save_ignored_contacts(items: list[str]):
-    IGNORED_CONTACTS_FILE.write_text(json.dumps(items, indent=2), encoding="utf-8")
+def save_whitelist(items: list[str]):
+    WHITELIST_FILE.write_text(json.dumps(items, indent=2), encoding="utf-8")
 
 
-def should_ignore_contact(push_name: str, sender_jid: str) -> bool:
-    entries = load_ignored_contacts()
+def is_contact_allowed(push_name: str, sender_jid: str, from_me: bool) -> bool:
+    entries = load_whitelist()
     if not entries:
         return False
+    if from_me:
+        return True
     push_lower = (push_name or "").lower()
     sender_lower = (sender_jid or "").lower()
     for item in entries:
@@ -200,7 +202,7 @@ def build_help_message() -> str:
         f"• `{BOT_TRIGGER} status`\n"
         f"• `{BOT_TRIGGER} help`\n"
         f"• `{BOT_TRIGGER} restart`\n\n"
-        "🛑 CONVERSATION IGNORE LIST (WHATSAPP)\n"
+        "✅ CONVERSATIONAL ALLOWED LIST (WHATSAPP)\n"
         f"• `{BOT_TRIGGER} whitelist add <name>`\n"
         f"• `{BOT_TRIGGER} whitelist remove <name>`\n"
         f"• `{BOT_TRIGGER} whitelist`\n\n"
@@ -325,17 +327,18 @@ def process_task(task: dict):
     push_name = (task.get("pushName") or "").strip()
     task_mode = (task.get("mode") or "agent").strip()
     query = parse_gemini_query(instruction)
+    from_me = bool(task.get("fromMe", False))
 
     if instruction_lower.startswith("whitelist add "):
         name_to_add = instruction[14:].strip()
         if not name_to_add:
             report_result(task_id, "⚠️ Usage: whitelist add <name>")
             return
-        items = load_ignored_contacts()
+        items = load_whitelist()
         if name_to_add not in items:
             items.append(name_to_add)
-            save_ignored_contacts(items)
-        report_result(task_id, f"✅ Added '{name_to_add}' to the ignore list.")
+            save_whitelist(items)
+        report_result(task_id, f"✅ Added '{name_to_add}' to the allowed contacts list.")
         return
 
     if instruction_lower.startswith("whitelist remove "):
@@ -343,27 +346,27 @@ def process_task(task: dict):
         if not name_to_remove:
             report_result(task_id, "⚠️ Usage: whitelist remove <name>")
             return
-        items = load_ignored_contacts()
+        items = load_whitelist()
         lowered = [x.lower() for x in items]
         if name_to_remove.lower() in lowered:
             idx = lowered.index(name_to_remove.lower())
             removed = items.pop(idx)
-            save_ignored_contacts(items)
-            report_result(task_id, f"✅ Removed '{removed}' from the ignore list.")
+            save_whitelist(items)
+            report_result(task_id, f"✅ Removed '{removed}' from the allowed contacts list.")
         else:
-            report_result(task_id, f"⚠️ '{name_to_remove}' not found in ignore list.")
+            report_result(task_id, f"⚠️ '{name_to_remove}' not found in allowed contacts list.")
         return
 
     if instruction_lower == "whitelist":
-        items = load_ignored_contacts()
+        items = load_whitelist()
         if items:
-            report_result(task_id, "🛑 *Ignored Contacts (Whitelist)*\n" + "\n".join(f"- {x}" for x in items))
+            report_result(task_id, "✅ *Allowed Contacts (Whitelist)*\n" + "\n".join(f"- {x}" for x in items))
         else:
-            report_result(task_id, "🛑 Ignore list is empty.")
+            report_result(task_id, "⚠️ Whitelist is empty! Revan will NOT answer anyone.")
         return
 
     if task_mode in {"public_chat", "trusted_chat"}:
-        if should_ignore_contact(push_name, sender):
+        if not is_contact_allowed(push_name, sender, from_me):
             return
         report_result(task_id, safe_conversational_reply(instruction, task_mode))
         return

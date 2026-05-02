@@ -7,6 +7,6 @@ __pycache__/
 *.log
 kuun.config
 allowed_numbers.txt
-ignored_contacts.json
+whitelist.json
 media/
 brain/scheduled_jobs.json

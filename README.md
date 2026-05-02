@@ -193,9 +193,9 @@ Security behavior:
 Ack behavior:
 - `🤖 [<trigger>] Working...` is sent only for `agent` mode (trusted trigger).
 
-## Ignore List For Conversational Replies
+## Allowed List For Conversational Replies
 
-You can block Kuun from sending conversational replies to specific contacts.
+Kuun now answers conversational messages only for contacts in the whitelist.
 
 WhatsApp commands:
 - `<bot-name> whitelist add <name-or-partial>`
@@ -203,10 +203,11 @@ WhatsApp commands:
 - `<bot-name> whitelist`
 
 How matching works:
-- Entries are stored in `ignored_contacts.json`.
+- Entries are stored in `whitelist.json`.
 - Matching is case-insensitive against both contact `pushName` and sender JID.
-- If matched, Kuun skips reply for `trusted_chat` and `public_chat`.
-- Triggered `agent` tasks are not blocked by this conversational ignore list.
+- If matched, Kuun replies in `trusted_chat` and `public_chat`.
+- If not matched, Kuun does not reply in conversational modes.
+- Triggered `agent` tasks are not blocked by this conversational whitelist.
 
 ## Scheduler (WhatsApp)
 
