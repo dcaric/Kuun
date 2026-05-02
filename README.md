@@ -201,6 +201,9 @@ WhatsApp commands:
 - `<bot-name> whitelist add <name-or-partial>`
 - `<bot-name> whitelist remove <name-or-partial>`
 - `<bot-name> whitelist`
+- `<bot-name> whitelist group add <group-id-or-name>`
+- `<bot-name> whitelist group remove <group-id-or-name>`
+- `<bot-name> whitelist group`
 
 How matching works:
 - Entries are stored in `whitelist.json`.
@@ -208,6 +211,10 @@ How matching works:
 - If matched, Kuun replies in `trusted_chat` and `public_chat`.
 - If not matched, Kuun does not reply in conversational modes.
 - Triggered `agent` tasks are not blocked by this conversational whitelist.
+- For group chats, Kuun replies only when:
+  - the message is a direct reply to Kuun, or
+  - the group is whitelisted by ID or group name.
+- Group entries are stored in `whitelist_groups.json`; discovered group names are cached in `group_cache.json`.
 
 ## Scheduler (WhatsApp)
 

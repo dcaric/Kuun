@@ -8,5 +8,7 @@ __pycache__/
 kuun.config
 allowed_numbers.txt
 whitelist.json
+whitelist_groups.json
+group_cache.json
 media/
 brain/scheduled_jobs.json

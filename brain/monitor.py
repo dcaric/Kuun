@@ -206,6 +206,10 @@ def build_help_message() -> str:
         f"• `{BOT_TRIGGER} whitelist add <name>`\n"
         f"• `{BOT_TRIGGER} whitelist remove <name>`\n"
         f"• `{BOT_TRIGGER} whitelist`\n\n"
+        "🏢 GROUP ALLOWED LIST (WHATSAPP)\n"
+        f"• `{BOT_TRIGGER} whitelist group add <id-or-name>`\n"
+        f"• `{BOT_TRIGGER} whitelist group remove <id-or-name>`\n"
+        f"• `{BOT_TRIGGER} whitelist group`\n\n"
         "🔒 WHITELIST (CLI)\n"
         "• `kuun add-number <num>`\n"
         "• `kuun remove-number <num>`\n"
@@ -363,6 +367,66 @@ def process_task(task: dict):
             report_result(task_id, "✅ *Allowed Contacts (Whitelist)*\n" + "\n".join(f"- {x}" for x in items))
         else:
             report_result(task_id, "⚠️ Whitelist is empty! Revan will NOT answer anyone.")
+        return
+
+    if instruction_lower.startswith("whitelist group add "):
+        group_to_add = instruction[20:].strip()
+        if not group_to_add:
+            report_result(task_id, "⚠️ Usage: whitelist group add <id-or-name>")
+            return
+        groups_file = PROJECT_ROOT / "whitelist_groups.json"
+        groups = []
+        if groups_file.exists():
+            try:
+                data = json.loads(groups_file.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    groups = [str(x) for x in data]
+            except Exception:
+                pass
+        if group_to_add not in groups:
+            groups.append(group_to_add)
+            groups_file.write_text(json.dumps(groups, indent=2), encoding="utf-8")
+        report_result(task_id, f"✅ Added group '{group_to_add}' to the allowed groups list.")
+        return
+
+    if instruction_lower.startswith("whitelist group remove "):
+        group_to_remove = instruction[23:].strip()
+        if not group_to_remove:
+            report_result(task_id, "⚠️ Usage: whitelist group remove <id-or-name>")
+            return
+        groups_file = PROJECT_ROOT / "whitelist_groups.json"
+        groups = []
+        if groups_file.exists():
+            try:
+                data = json.loads(groups_file.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    groups = [str(x) for x in data]
+            except Exception:
+                pass
+        lowered = [g.lower() for g in groups]
+        if group_to_remove.lower() in lowered:
+            idx = lowered.index(group_to_remove.lower())
+            removed = groups.pop(idx)
+            groups_file.write_text(json.dumps(groups, indent=2), encoding="utf-8")
+            report_result(task_id, f"✅ Removed group '{removed}' from the allowed groups list.")
+        else:
+            report_result(task_id, f"⚠️ Group '{group_to_remove}' not found in allowed groups list.")
+        return
+
+    if instruction_lower == "whitelist group":
+        groups_file = PROJECT_ROOT / "whitelist_groups.json"
+        groups = []
+        if groups_file.exists():
+            try:
+                data = json.loads(groups_file.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    groups = [str(x) for x in data]
+            except Exception:
+                pass
+        if groups:
+            report_result(task_id, "🏢 *Allowed Groups (Whitelist)*\n" + "\n".join(f"- {g}" for g in groups))
+        else:
+            report_result(task_id, "🏢 No groups whitelisted. Group messages are ignored by default.")
         return
 
     if task_mode in {"public_chat", "trusted_chat"}:

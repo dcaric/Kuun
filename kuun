@@ -323,6 +323,9 @@ help_cmd() {
   echo "  whitelist add <n>   Allow a contact for conversational mode"
   echo "  whitelist remove <n> Remove a contact from allowed list"
   echo "  whitelist           Show allowed contacts"
+  echo "  whitelist group add <id-or-name>    Allow conversational replies in group"
+  echo "  whitelist group remove <id-or-name> Remove group from allowed list"
+  echo "  whitelist group     Show allowed groups"
   echo "  whatsapp            Run WhatsApp bridge in foreground"
   echo "  whatsapp link       Launch WhatsApp linking process (QR code)"
   echo "  help                Show this message"
@@ -374,6 +377,12 @@ case "$1" in
       echo "Use via WhatsApp: ${BOT_TRIGGER:-kuun} whitelist add $3"
     elif [ "$2" = "remove" ] && [ -n "$3" ]; then
       echo "Use via WhatsApp: ${BOT_TRIGGER:-kuun} whitelist remove $3"
+    elif [ "$2" = "group" ] && [ "$3" = "add" ] && [ -n "$4" ]; then
+      echo "Use via WhatsApp: ${BOT_TRIGGER:-kuun} whitelist group add $4"
+    elif [ "$2" = "group" ] && [ "$3" = "remove" ] && [ -n "$4" ]; then
+      echo "Use via WhatsApp: ${BOT_TRIGGER:-kuun} whitelist group remove $4"
+    elif [ "$2" = "group" ]; then
+      echo "Use via WhatsApp: ${BOT_TRIGGER:-kuun} whitelist group"
     else
       echo "Use via WhatsApp: ${BOT_TRIGGER:-kuun} whitelist"
     fi

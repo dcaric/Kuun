@@ -20,6 +20,8 @@ const BOT_TRIGGER = (process.env.BOT_TRIGGER || 'kuun').trim();
 const BRIDGE_SECRET_KEY = process.env.BRIDGE_SECRET_KEY || '';
 const AUTH_DIR = path.resolve(__dirname, '.kuun_cache');
 const ALLOWED_NUMBERS_FILE = path.resolve(__dirname, 'allowed_numbers.txt');
+const WHITELIST_GROUPS_FILE = path.resolve(__dirname, 'whitelist_groups.json');
+const GROUP_CACHE_FILE = path.resolve(__dirname, 'group_cache.json');
 const TRUSTED_NAMES = new Set(
   (process.env.TRUSTED_NAMES || 'Dario,Dario Caric')
     .split(',')
@@ -28,6 +30,25 @@ const TRUSTED_NAMES = new Set(
 );
 
 const logger = pino({ level: 'silent' });
+const groupNameCache = new Map();
+
+if (fs.existsSync(GROUP_CACHE_FILE)) {
+  try {
+    const data = JSON.parse(fs.readFileSync(GROUP_CACHE_FILE, 'utf8'));
+    Object.entries(data).forEach(([jid, name]) => groupNameCache.set(jid, name));
+  } catch (err) {
+    console.error('⚠️ Failed to read group cache:', err.message);
+  }
+}
+
+function saveGroupCache() {
+  try {
+    const data = Object.fromEntries(groupNameCache);
+    fs.writeFileSync(GROUP_CACHE_FILE, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error('⚠️ Failed to save group cache:', err.message);
+  }
+}
 
 function getBrowserProfile() {
   const platform = os.platform();
@@ -161,14 +182,59 @@ async function startWhatsApp() {
       const isTriggered = triggerRegex.test(text);
       const isBotLike = text.startsWith('🤖') || text.startsWith('♊') || text.startsWith('📊');
       const isGroup = isGroupJid(jid);
-      const isReplyToMe = isReplyToBotMessage(msg, sock);
+      let isReplyToMe = isReplyToBotMessage(msg, sock);
+      let isWhitelistedGroup = false;
       const allowlist = loadAllowedNumbers();
       const trustedSender = fromMe || isTrustedSender(jid, senderName, allowlist);
       const isRecentOutboundEcho = fromMe && isBotLike;
       const allowSelfConversation = false;
 
       if (fromMe && !allowSelfConversation && (!isTriggered || isRecentOutboundEcho)) continue;
-      if (isGroup && !isReplyToMe) {
+
+      if (isGroup) {
+        if (!isReplyToMe && sock.user && sock.user.id) {
+          const myNumber = normalizeJidUser(sock.user.id);
+          const participant = normalizeJidUser(msg.message?.extendedTextMessage?.contextInfo?.participant || '');
+          if (participant && myNumber && participant === myNumber) {
+            isReplyToMe = true;
+          }
+        }
+
+        let groupName = groupNameCache.get(jid);
+        if (!groupName) {
+          try {
+            const metadata = await sock.groupMetadata(jid);
+            groupName = metadata?.subject || '';
+            if (groupName) {
+              groupNameCache.set(jid, groupName);
+              saveGroupCache();
+            }
+          } catch (_) {
+            // ignore metadata lookup failures
+          }
+        }
+
+        if (fs.existsSync(WHITELIST_GROUPS_FILE)) {
+          try {
+            const groups = JSON.parse(fs.readFileSync(WHITELIST_GROUPS_FILE, 'utf8'));
+            if (Array.isArray(groups)) {
+              const groupsLower = groups.map((g) => String(g).toLowerCase());
+              const jidCore = jid.split('@')[0];
+              if (
+                groups.includes(jid) ||
+                groups.includes(jidCore) ||
+                (groupName && groupsLower.includes(groupName.toLowerCase()))
+              ) {
+                isWhitelistedGroup = true;
+              }
+            }
+          } catch (err) {
+            console.error('⚠️ Failed to read group whitelist:', err.message);
+          }
+        }
+      }
+
+      if (isGroup && !isReplyToMe && !isWhitelistedGroup) {
         console.log(`👥 Ignoring group message without direct reply from ${senderName}`);
         continue;
       }
