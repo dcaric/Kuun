@@ -21,8 +21,10 @@ const BRIDGE_SECRET_KEY = process.env.BRIDGE_SECRET_KEY || '';
 const HUMAN_INTERVENTION_TIMEOUT = Number(process.env.HUMAN_INTERVENTION_TIMEOUT || '300');
 const AUTH_DIR = path.resolve(__dirname, '.kuun_cache');
 const ALLOWED_NUMBERS_FILE = path.resolve(__dirname, 'allowed_numbers.txt');
+const WHITELIST_FILE = path.resolve(__dirname, 'whitelist.json');
 const WHITELIST_GROUPS_FILE = path.resolve(__dirname, 'whitelist_groups.json');
 const GROUP_CACHE_FILE = path.resolve(__dirname, 'group_cache.json');
+const CONTACTS_CACHE_FILE = path.resolve(__dirname, 'contacts_cache.json');
 const TRUSTED_NAMES = new Set(
   (process.env.TRUSTED_NAMES || 'Dario,Dario Caric')
     .split(',')
@@ -32,6 +34,7 @@ const TRUSTED_NAMES = new Set(
 
 const logger = pino({ level: 'silent' });
 const groupNameCache = new Map();
+const contactCache = new Map();
 const lastManualMessageAt = new Map();
 
 if (fs.existsSync(GROUP_CACHE_FILE)) {
@@ -49,6 +52,24 @@ function saveGroupCache() {
     fs.writeFileSync(GROUP_CACHE_FILE, JSON.stringify(data, null, 2));
   } catch (err) {
     console.error('⚠️ Failed to save group cache:', err.message);
+  }
+}
+
+if (fs.existsSync(CONTACTS_CACHE_FILE)) {
+  try {
+    const data = JSON.parse(fs.readFileSync(CONTACTS_CACHE_FILE, 'utf8'));
+    Object.entries(data).forEach(([jid, name]) => contactCache.set(jid, name));
+  } catch (err) {
+    console.error('⚠️ Failed to read contacts cache:', err.message);
+  }
+}
+
+function saveContactCache() {
+  try {
+    const data = Object.fromEntries(contactCache);
+    fs.writeFileSync(CONTACTS_CACHE_FILE, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error('⚠️ Failed to save contacts cache:', err.message);
   }
 }
 
@@ -126,9 +147,43 @@ function isAllowedSender(jid, allowlist) {
   return allowlist.has(exact) || allowlist.has(bare) || allowlist.has(bareDigits);
 }
 
+function loadWhitelist() {
+  try {
+    if (!fs.existsSync(WHITELIST_FILE)) return {};
+    const data = JSON.parse(fs.readFileSync(WHITELIST_FILE, 'utf8'));
+    if (Array.isArray(data)) {
+      const mapped = {};
+      data.forEach((v) => {
+        const key = String(v || '').trim();
+        if (key) mapped[key] = key;
+      });
+      return mapped;
+    }
+    if (data && typeof data === 'object') return data;
+  } catch (err) {
+    console.error('⚠️ Failed to read whitelist:', err.message);
+  }
+  return {};
+}
+
 function isTrustedSender(jid, pushName, allowlist) {
-  const normalizedName = String(pushName || '').trim().toLowerCase();
-  return isAllowedSender(jid, allowlist) || (!!normalizedName && TRUSTED_NAMES.has(normalizedName));
+  const normalizedPushName = String(pushName || '').trim().toLowerCase();
+  const phoneId = normalizeJidUser(jid || '');
+  const whitelist = loadWhitelist();
+  const addressBookName = String(contactCache.get(jid) || '').trim().toLowerCase();
+
+  for (const [keyRaw, valRaw] of Object.entries(whitelist)) {
+    const key = String(keyRaw || '').trim().toLowerCase();
+    const value = String(valRaw || '').trim().toLowerCase();
+    if (!key && !value) continue;
+
+    if (key && (jid.toLowerCase() === key || phoneId === key || jid.toLowerCase().startsWith(key))) return true;
+    if (value && normalizedPushName && (normalizedPushName.includes(value) || value.includes(normalizedPushName))) return true;
+    if (value && addressBookName && (addressBookName.includes(value) || value.includes(addressBookName))) return true;
+    if (key && normalizedPushName && (normalizedPushName.includes(key) || key.includes(normalizedPushName))) return true;
+  }
+
+  return isAllowedSender(jid, allowlist) || (!!normalizedPushName && TRUSTED_NAMES.has(normalizedPushName));
 }
 
 function markManualMessage(jid) {
@@ -178,6 +233,51 @@ async function startWhatsApp() {
       console.log('✅ WhatsApp connected');
       global.whatsappSock = sock;
     }
+  });
+
+  sock.ev.on('contacts.set', ({ contacts }) => {
+    contacts.forEach((c) => {
+      if (c.id && (c.name || c.verifiedName)) {
+        contactCache.set(c.id, c.name || c.verifiedName);
+      }
+    });
+    saveContactCache();
+  });
+
+  sock.ev.on('contacts.upsert', (contacts) => {
+    contacts.forEach((c) => {
+      if (c.id && (c.name || c.verifiedName)) {
+        contactCache.set(c.id, c.name || c.verifiedName);
+      }
+    });
+    saveContactCache();
+  });
+
+  sock.ev.on('contacts.update', (updates) => {
+    updates.forEach((c) => {
+      if (c.id && (c.name || c.verifiedName)) {
+        contactCache.set(c.id, c.name || c.verifiedName);
+      }
+    });
+    saveContactCache();
+  });
+
+  sock.ev.on('chats.set', ({ chats }) => {
+    chats.forEach((c) => {
+      if (c.id && c.name && !isGroupJid(c.id)) {
+        contactCache.set(c.id, c.name);
+      }
+    });
+    saveContactCache();
+  });
+
+  sock.ev.on('chats.upsert', (chats) => {
+    chats.forEach((c) => {
+      if (c.id && c.name && !isGroupJid(c.id)) {
+        contactCache.set(c.id, c.name);
+      }
+    });
+    saveContactCache();
   });
 
   sock.ev.on('messages.upsert', async ({ type, messages }) => {

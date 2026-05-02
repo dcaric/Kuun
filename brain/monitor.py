@@ -25,6 +25,7 @@ JOBS_FILE = PROJECT_ROOT / "brain" / "scheduled_jobs.json"
 KUUN_CLI = PROJECT_ROOT / "kuun"
 ACTIVE_GEMINI_JOBS = {}
 WHITELIST_FILE = PROJECT_ROOT / "whitelist.json"
+CONTACTS_CACHE_FILE = PROJECT_ROOT / "contacts_cache.json"
 
 
 def report_status(task_id: str, message: str):
@@ -51,19 +52,33 @@ def report_result(task_id: str, output: str):
         pass
 
 
-def load_whitelist() -> list[str]:
+def load_whitelist() -> dict[str, str]:
     if not WHITELIST_FILE.exists():
-        return []
+        return {}
     try:
         data = json.loads(WHITELIST_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            out: dict[str, str] = {}
+            for k, v in data.items():
+                key = str(k).strip()
+                val = str(v).strip()
+                if key and val:
+                    out[key] = val
+            return out
         if isinstance(data, list):
-            return [str(x) for x in data if str(x).strip()]
+            # Backward compatibility: upgrade list format to key=value mapping.
+            out: dict[str, str] = {}
+            for x in data:
+                s = str(x).strip()
+                if s:
+                    out[s] = s
+            return out
     except Exception:
         pass
-    return []
+    return {}
 
 
-def save_whitelist(items: list[str]):
+def save_whitelist(items: dict[str, str]):
     WHITELIST_FILE.write_text(json.dumps(items, indent=2), encoding="utf-8")
 
 
@@ -75,11 +90,17 @@ def is_contact_allowed(push_name: str, sender_jid: str, from_me: bool) -> bool:
         return True
     push_lower = (push_name or "").lower()
     sender_lower = (sender_jid or "").lower()
-    for item in entries:
-        i = item.lower().strip()
-        if not i:
+    jid_core = sender_lower.split("@")[0]
+    for key, value in entries.items():
+        k = key.lower().strip()
+        v = value.lower().strip()
+        if not k and not v:
             continue
-        if i in push_lower or i in sender_lower:
+        if k and (sender_lower == k or jid_core == k or sender_lower.startswith(k)):
+            return True
+        if v and (v in push_lower or push_lower in v):
+            return True
+        if k and (k in push_lower or push_lower in k):
             return True
     return False
 
@@ -339,10 +360,27 @@ def process_task(task: dict):
             report_result(task_id, "⚠️ Usage: whitelist add <name>")
             return
         items = load_whitelist()
-        if name_to_add not in items:
-            items.append(name_to_add)
-            save_whitelist(items)
-        report_result(task_id, f"✅ Added '{name_to_add}' to the allowed contacts list.")
+        resolved_jid = None
+        if CONTACTS_CACHE_FILE.exists():
+            try:
+                contacts = json.loads(CONTACTS_CACHE_FILE.read_text(encoding="utf-8"))
+                if isinstance(contacts, dict):
+                    target = name_to_add.lower().strip()
+                    for jid, cname in contacts.items():
+                        c = str(cname).lower().strip()
+                        if target and c and target in c:
+                            resolved_jid = str(jid)
+                            break
+            except Exception:
+                pass
+
+        if resolved_jid:
+            items[resolved_jid] = name_to_add
+            report_result(task_id, f"✅ Resolved '{name_to_add}' to {resolved_jid.split('@')[0]} and added to whitelist.")
+        else:
+            items[name_to_add] = name_to_add
+            report_result(task_id, f"✅ Added '{name_to_add}' to whitelist (number not resolved yet).")
+        save_whitelist(items)
         return
 
     if instruction_lower.startswith("whitelist remove "):
@@ -351,20 +389,32 @@ def process_task(task: dict):
             report_result(task_id, "⚠️ Usage: whitelist remove <name>")
             return
         items = load_whitelist()
-        lowered = [x.lower() for x in items]
-        if name_to_remove.lower() in lowered:
-            idx = lowered.index(name_to_remove.lower())
-            removed = items.pop(idx)
+        target = name_to_remove.lower().strip()
+        removed_key = None
+        for k, v in items.items():
+            if target in str(k).lower() or target in str(v).lower():
+                removed_key = k
+                break
+        if removed_key is not None:
+            removed_val = items.pop(removed_key)
             save_whitelist(items)
-            report_result(task_id, f"✅ Removed '{removed}' from the allowed contacts list.")
-        else:
-            report_result(task_id, f"⚠️ '{name_to_remove}' not found in allowed contacts list.")
+            report_result(
+                task_id,
+                f"✅ Removed '{removed_val}' ({str(removed_key).split('@')[0]}) from the allowed contacts list.",
+            )
+            return
+        report_result(task_id, f"⚠️ '{name_to_remove}' not found in allowed contacts list.")
         return
 
     if instruction_lower == "whitelist":
         items = load_whitelist()
         if items:
-            report_result(task_id, "✅ *Allowed Contacts (Whitelist)*\n" + "\n".join(f"- {x}" for x in items))
+            lines = []
+            for k, v in items.items():
+                key_txt = str(k)
+                num = key_txt.split("@")[0] if "@" in key_txt else "name"
+                lines.append(f"- {v} ({num})")
+            report_result(task_id, "✅ *Allowed Contacts (Whitelist)*\n" + "\n".join(lines))
         else:
             report_result(task_id, "⚠️ Whitelist is empty! Revan will NOT answer anyone.")
         return
