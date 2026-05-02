@@ -4,6 +4,8 @@ import os
 import re
 import subprocess
 
+BOT_NAME = os.getenv("BOT_TRIGGER", "Kuun")
+
 
 def clean_output(text: str) -> str:
     if not text:
@@ -55,7 +57,7 @@ def build_public_directive() -> str:
 
 def build_trusted_directive() -> str:
     return (
-        "You are Kuun, Dario's trusted WhatsApp agent.\n"
+        f"You are {BOT_NAME}, Dario's trusted WhatsApp agent.\n"
         "TRUSTED REPLY MODE.\n"
         "Rules:\n"
         "1. Reply warmly, concise, natural (1-3 short sentences).\n"
