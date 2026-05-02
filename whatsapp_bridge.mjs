@@ -18,6 +18,7 @@ const WA_API_BIND_HOST = process.env.WA_API_BIND_HOST || '127.0.0.1';
 const SERVER_URL = process.env.BRIDGE_SERVER_URL || `http://localhost:${FASTAPI_PORT}/webhook/message`;
 const BOT_TRIGGER = (process.env.BOT_TRIGGER || 'kuun').trim();
 const BRIDGE_SECRET_KEY = process.env.BRIDGE_SECRET_KEY || '';
+const HUMAN_INTERVENTION_TIMEOUT = Number(process.env.HUMAN_INTERVENTION_TIMEOUT || '300');
 const AUTH_DIR = path.resolve(__dirname, '.kuun_cache');
 const ALLOWED_NUMBERS_FILE = path.resolve(__dirname, 'allowed_numbers.txt');
 const WHITELIST_GROUPS_FILE = path.resolve(__dirname, 'whitelist_groups.json');
@@ -31,6 +32,7 @@ const TRUSTED_NAMES = new Set(
 
 const logger = pino({ level: 'silent' });
 const groupNameCache = new Map();
+const lastManualMessageAt = new Map();
 
 if (fs.existsSync(GROUP_CACHE_FILE)) {
   try {
@@ -129,6 +131,19 @@ function isTrustedSender(jid, pushName, allowlist) {
   return isAllowedSender(jid, allowlist) || (!!normalizedName && TRUSTED_NAMES.has(normalizedName));
 }
 
+function markManualMessage(jid) {
+  if (!jid) return;
+  lastManualMessageAt.set(jid, Date.now());
+}
+
+function hasRecentManualIntervention(jid) {
+  if (!jid) return false;
+  const ts = lastManualMessageAt.get(jid);
+  if (!ts) return false;
+  const timeoutMs = Math.max(0, HUMAN_INTERVENTION_TIMEOUT) * 1000;
+  return (Date.now() - ts) < timeoutMs;
+}
+
 async function startWhatsApp() {
   console.log(`🚀 Starting WhatsApp bridge (trigger: ${BOT_TRIGGER})`);
 
@@ -189,6 +204,11 @@ async function startWhatsApp() {
       const isRecentOutboundEcho = fromMe && isBotLike;
       const allowSelfConversation = false;
 
+      // Track real manual outgoing messages as human intervention.
+      if (fromMe && !isTriggered && !isBotLike) {
+        markManualMessage(jid);
+      }
+
       if (fromMe && !allowSelfConversation && (!isTriggered || isRecentOutboundEcho)) continue;
 
       if (isGroup) {
@@ -241,6 +261,11 @@ async function startWhatsApp() {
 
       const finalTriggered = trustedSender && isTriggered;
       const taskMode = finalTriggered ? 'agent' : (trustedSender ? 'trusted_chat' : 'public_chat');
+
+      // If user manually took over this chat recently, keep Revan/Kuun silent for a while.
+      if (!fromMe && taskMode === 'trusted_chat' && hasRecentManualIntervention(jid)) {
+        continue;
+      }
 
       try {
         await axios.post(SERVER_URL, {

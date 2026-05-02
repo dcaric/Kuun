@@ -59,6 +59,7 @@ async def handle_incoming_message(payload: dict, authorization: Optional[str] = 
         "instruction": instruction,
         "sender": sender,
         "pushName": payload.get("pushName", ""),
+        "fromMe": bool(payload.get("fromMe", False)),
         "source": source,
         "mode": payload.get("mode", "agent"),
         "status": "pending",

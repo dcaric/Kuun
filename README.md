@@ -189,6 +189,7 @@ Security behavior:
 - `trusted_chat` and `public_chat` do **not** run Gemini background jobs.
 - Conversational replies in those safe modes are generated through a restricted path (`brain/ask_codex.py`) without dangerous execution flags.
 - Outbound self-loop prevention remains enabled (`fromMe` autonomous conversation is blocked unless explicitly triggered).
+- Human intervention cooldown: after your manual outgoing WhatsApp message, Kuun stays silent in `trusted_chat` for `HUMAN_INTERVENTION_TIMEOUT` seconds (default `300`).
 
 Ack behavior:
 - `🤖 [<trigger>] Working...` is sent only for `agent` mode (trusted trigger).
