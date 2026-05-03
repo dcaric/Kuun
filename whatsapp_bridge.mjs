@@ -19,6 +19,9 @@ const SERVER_URL = process.env.BRIDGE_SERVER_URL || `http://localhost:${FASTAPI_
 const BOT_TRIGGER = (process.env.BOT_TRIGGER || 'kuun').trim();
 const BRIDGE_SECRET_KEY = process.env.BRIDGE_SECRET_KEY || '';
 const HUMAN_INTERVENTION_TIMEOUT = Number(process.env.HUMAN_INTERVENTION_TIMEOUT || '300');
+const ALLOW_FROMME_SYSTEM = ['1', 'true', 'on', 'yes'].includes(
+  String(process.env.ALLOW_FROMME_SYSTEM || 'true').toLowerCase()
+);
 const AUTH_DIR = path.resolve(__dirname, '.kuun_cache');
 const ALLOWED_NUMBERS_FILE = path.resolve(__dirname, 'allowed_numbers.txt');
 const WHITELIST_FILE = path.resolve(__dirname, 'whitelist.json');
@@ -148,7 +151,7 @@ function isAllowedSender(jid, allowlist) {
 }
 
 function isSystemUser(jid, fromMe, allowlist) {
-  if (fromMe) return true;
+  if (fromMe && ALLOW_FROMME_SYSTEM) return true;
   return isAllowedSender(jid, allowlist);
 }
 
@@ -418,6 +421,12 @@ app.post('/send', async (req, res) => {
 
   let jid = to;
   if (!jid.includes('@')) jid += '@s.whatsapp.net';
+
+  // Final send-time authorization check: never deliver to unauthorized recipients.
+  const allowlist = loadAllowedNumbers();
+  if (!isAllowedSender(jid, allowlist)) {
+    return res.status(403).json({ error: 'Recipient not authorized' });
+  }
 
   try {
     await global.whatsappSock.sendMessage(jid, { text });
