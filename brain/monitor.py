@@ -26,6 +26,7 @@ KUUN_CLI = PROJECT_ROOT / "kuun"
 ACTIVE_GEMINI_JOBS = {}
 WHITELIST_FILE = PROJECT_ROOT / "whitelist.json"
 CONTACTS_CACHE_FILE = PROJECT_ROOT / "contacts_cache.json"
+ALLOWED_NUMBERS_FILE = PROJECT_ROOT / "allowed_numbers.txt"
 
 
 def report_status(task_id: str, message: str):
@@ -80,6 +81,29 @@ def load_whitelist() -> dict[str, str]:
 
 def save_whitelist(items: dict[str, str]):
     WHITELIST_FILE.write_text(json.dumps(items, indent=2), encoding="utf-8")
+
+
+def is_system_user(sender_jid: str, from_me: bool = False) -> bool:
+    if from_me:
+        return True
+    if not sender_jid:
+        return False
+
+    phone = re.sub(r"\D", "", str(sender_jid).split("@")[0].split(":")[0])
+    if not phone:
+        return False
+
+    try:
+        if not ALLOWED_NUMBERS_FILE.exists():
+            return False
+        nums = {
+            re.sub(r"\D", "", line.strip())
+            for line in ALLOWED_NUMBERS_FILE.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        }
+        return phone in nums
+    except Exception:
+        return False
 
 
 def is_contact_allowed(push_name: str, sender_jid: str, from_me: bool) -> bool:
@@ -353,6 +377,9 @@ def process_task(task: dict):
     task_mode = (task.get("mode") or "agent").strip()
     query = parse_gemini_query(instruction)
     from_me = bool(task.get("fromMe", False))
+
+    if task_mode == "agent" and not is_system_user(sender, from_me=from_me):
+        return
 
     if instruction_lower.startswith("whitelist add "):
         name_to_add = instruction[14:].strip()

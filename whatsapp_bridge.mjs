@@ -147,6 +147,11 @@ function isAllowedSender(jid, allowlist) {
   return allowlist.has(exact) || allowlist.has(bare) || allowlist.has(bareDigits);
 }
 
+function isSystemUser(jid, fromMe, allowlist) {
+  if (fromMe) return true;
+  return isAllowedSender(jid, allowlist);
+}
+
 function loadWhitelist() {
   try {
     if (!fs.existsSync(WHITELIST_FILE)) return {};
@@ -300,7 +305,8 @@ async function startWhatsApp() {
       let isReplyToMe = isReplyToBotMessage(msg, sock);
       let isWhitelistedGroup = false;
       const allowlist = loadAllowedNumbers();
-      const trustedSender = fromMe || isTrustedSender(jid, senderName, allowlist);
+      const isSystem = isSystemUser(jid, fromMe, allowlist);
+      const trustedSender = isSystem || isTrustedSender(jid, senderName, allowlist);
       const isRecentOutboundEcho = fromMe && isBotLike;
       const allowSelfConversation = false;
 
@@ -359,8 +365,12 @@ async function startWhatsApp() {
         continue;
       }
 
-      const finalTriggered = trustedSender && isTriggered;
+      const finalTriggered = isSystem && isTriggered;
       const taskMode = finalTriggered ? 'agent' : (trustedSender ? 'trusted_chat' : 'public_chat');
+
+      if (!isSystem && isTriggered) {
+        continue;
+      }
 
       // If user manually took over this chat recently, keep Revan/Kuun silent for a while.
       if (!fromMe && taskMode === 'trusted_chat' && hasRecentManualIntervention(jid)) {
