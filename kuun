@@ -1,0 +1,633 @@
+#!/bin/bash
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+BASE_DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+
+export LOG_FILE="$BASE_DIR/kuun.log"
+touch "$LOG_FILE" 2>/dev/null || export LOG_FILE="/tmp/kuun_$(whoami).log"
+
+CONFIG_FILE="$BASE_DIR/kuun.config"
+EXAMPLE_FILE="$BASE_DIR/kuun.config.example"
+ensure_killed() {
+  local pattern=$1
+  local name=$2
+  if pgrep -f "$pattern" >/dev/null; then
+    echo "⏳ Stopping $name..."
+    pkill -f "$pattern" >/dev/null 2>&1
+
+    # Wait up to 5 seconds for graceful exit.
+    for _ in {1..10}; do
+      if ! pgrep -f "$pattern" >/dev/null; then
+        return 0
+      fi
+      sleep 0.5
+    done
+
+    # Force kill if still alive.
+    pkill -9 -f "$pattern" >/dev/null 2>&1
+
+    # Final short wait.
+    for _ in {1..10}; do
+      if ! pgrep -f "$pattern" >/dev/null; then
+        return 0
+      fi
+      sleep 0.2
+    done
+  fi
+}
+
+ensure_config() {
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "📄 Creating kuun.config from example..."
+    cp "$EXAMPLE_FILE" "$CONFIG_FILE"
+  fi
+
+  # Automatically generate BRIDGE_SECRET_KEY if it's the placeholder
+  if grep -q "BRIDGE_SECRET_KEY=CHANGE_ME_STRONG_SECRET" "$CONFIG_FILE"; then
+    echo "🔐 Generating random BRIDGE_SECRET_KEY..."
+    local NEW_KEY
+    # Use openssl if available, fallback to /dev/urandom + timestamp seed for secure randomness
+    if command -v openssl >/dev/null 2>&1; then
+      NEW_KEY=$(openssl rand -hex 32)
+    else
+      NEW_KEY=$( (echo "$$"; date +%s%N; head -c 32 /dev/urandom | xxd -p -c 64) | shasum -a 256 | cut -d' ' -f1)
+    fi
+    sed -i.bak "s|BRIDGE_SECRET_KEY=CHANGE_ME_STRONG_SECRET|BRIDGE_SECRET_KEY=${NEW_KEY}|" "$CONFIG_FILE"
+    rm -f "$CONFIG_FILE.bak"
+  fi
+
+  if ! grep -q "^GEMINI_MODEL=" "$CONFIG_FILE"; then
+    echo "GEMINI_MODEL=gemini-3.1-flash-lite" >> "$CONFIG_FILE"
+  fi
+
+  if ! grep -q "^AI_PROVIDER=" "$CONFIG_FILE"; then
+    echo "AI_PROVIDER=gemini" >> "$CONFIG_FILE"
+  fi
+
+  if ! grep -q "^CODEX_MODEL=" "$CONFIG_FILE"; then
+    echo "CODEX_MODEL=gpt-5.4" >> "$CONFIG_FILE"
+  fi
+
+  if ! grep -q "^GEMINI_PRICE_IN=" "$CONFIG_FILE"; then
+    echo "GEMINI_PRICE_IN=0.10" >> "$CONFIG_FILE"
+  fi
+
+  if ! grep -q "^GEMINI_PRICE_OUT=" "$CONFIG_FILE"; then
+    echo "GEMINI_PRICE_OUT=0.40" >> "$CONFIG_FILE"
+  fi
+}
+
+load_config() {
+  ensure_config
+  set -a
+  source "$CONFIG_FILE" 2>/dev/null || true
+  set +a
+}
+
+update_config() {
+  local key="$1"
+  local val="$2"
+  ensure_config
+  if grep -q "^${key}=" "$CONFIG_FILE"; then
+    sed -i.bak "s|^${key}=.*|${key}=${val}|" "$CONFIG_FILE"
+  else
+    echo "${key}=${val}" >> "$CONFIG_FILE"
+  fi
+  rm -f "$CONFIG_FILE.bak"
+}
+
+normalize_number() {
+  local raw="$1"
+  local num=""
+
+  raw="${raw%@*}"
+  num="$(echo "$raw" | tr -cd '0-9')"
+
+  echo "$num"
+}
+
+get_allowed_numbers_csv() {
+  ensure_config
+  local current
+  current="$(grep "^ALLOWED_NUMBERS=" "$CONFIG_FILE" | head -n1 | cut -d= -f2- || true)"
+  echo "$current"
+}
+
+set_allowed_numbers_csv() {
+  local csv="$1"
+  update_config "ALLOWED_NUMBERS" "$csv"
+}
+
+read_allowed_numbers_lines() {
+  local csv
+  csv="$(get_allowed_numbers_csv)"
+  echo "$csv" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d'
+}
+
+add_number() {
+  local raw="$1"
+  local num
+
+  if [ -z "$raw" ]; then
+    echo "Usage: kuun add-number <num>"
+    exit 1
+  fi
+
+  num="$(normalize_number "$raw")"
+
+  if [ -z "$num" ]; then
+    echo "❌ Invalid number: $raw"
+    exit 1
+  fi
+
+  local existing
+  existing="$(read_allowed_numbers_lines)"
+  if echo "$existing" | grep -qx "$num"; then
+    echo "ℹ️ Number already allowed: $num"
+    exit 0
+  fi
+
+  if [ -n "$existing" ]; then
+    set_allowed_numbers_csv "$(printf "%s\n%s\n" "$existing" "$num" | paste -sd, -)"
+  else
+    set_allowed_numbers_csv "$num"
+  fi
+  echo "✅ Added allowed number: $num"
+}
+
+remove_number() {
+  local raw="$1"
+  local num
+
+  if [ -z "$raw" ]; then
+    echo "Usage: kuun remove-number <num>"
+    exit 1
+  fi
+
+  num="$(normalize_number "$raw")"
+
+  if [ -z "$num" ]; then
+    echo "❌ Invalid number: $raw"
+    exit 1
+  fi
+
+  local existing
+  existing="$(read_allowed_numbers_lines)"
+  if ! echo "$existing" | grep -qx "$num"; then
+    echo "ℹ️ Number not in allowlist: $num"
+    exit 0
+  fi
+
+  local updated
+  updated="$(echo "$existing" | grep -vx "$num" || true)"
+  set_allowed_numbers_csv "$(echo "$updated" | paste -sd, -)"
+  echo "✅ Removed allowed number: $num"
+}
+
+list_users() {
+  echo "📱 Allowed numbers:"
+
+  local existing
+  existing="$(read_allowed_numbers_lines)"
+  if [ -z "$existing" ]; then
+    echo "(none - deny by default; add at least one number with: kuun add-number <num>)"
+    return
+  fi
+
+  echo "$existing" | nl -w1 -s'. '
+}
+
+set_gemini_model() {
+  local model="$1"
+  if [ -z "$model" ]; then
+    echo "Usage: kuun gemini <model>"
+    exit 1
+  fi
+  update_config "GEMINI_MODEL" "$model"
+  update_config "AI_PROVIDER" "gemini"
+  echo "✅ GEMINI_MODEL set to: $model"
+  echo "✅ AI_PROVIDER set to: gemini"
+  echo "🔄 Restart Kuun to apply: kuun restart"
+}
+
+set_token_prices() {
+  local in_price="$1"
+  local out_price="$2"
+  if [ -z "$in_price" ] || [ -z "$out_price" ]; then
+    echo "Usage: kuun tokens <input_price_per_1m> <output_price_per_1m>"
+    exit 1
+  fi
+  update_config "GEMINI_PRICE_IN" "$in_price"
+  update_config "GEMINI_PRICE_OUT" "$out_price"
+  echo "✅ Gemini token prices updated: input=$in_price output=$out_price"
+}
+
+set_gmail() {
+  local user="$1"
+  local pass="$2"
+  if [ -z "$user" ] || [ -z "$pass" ]; then
+    echo "Usage: kuun gmail <user> <app-password>"
+    exit 1
+  fi
+  update_config "GMAIL_USER" "$user"
+  update_config "GMAIL_APP_PASSWORD" "$pass"
+  echo "✅ Gmail credentials saved"
+}
+
+system_awake() {
+  update_config "SYSTEM_AWAKE" "true"
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    if ! pgrep -f "caffeinate -disu" >/dev/null; then
+      nohup caffeinate -disu sleep infinity >/dev/null 2>&1 &
+    fi
+  fi
+  echo "✅ System awake mode enabled"
+}
+
+system_awake_stop() {
+  update_config "SYSTEM_AWAKE" "false"
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    pkill -f "caffeinate -disu" >/dev/null 2>&1 || true
+  fi
+  echo "✅ System can sleep again"
+}
+
+setup() {
+  cd "$BASE_DIR" || exit 1
+  ensure_config
+
+  echo "📦 Installing Python dependencies..."
+  python3 -m venv venv
+  ./venv/bin/pip install -r requirements.txt
+
+  echo "📦 Installing Node dependencies..."
+  npm install
+
+  echo "✅ Setup complete"
+}
+
+update() {
+  cd "$BASE_DIR" || exit 1
+
+  echo "🔄 Pulling latest Kuun changes..."
+  git pull --ff-only
+
+  echo "📦 Updating Python dependencies (requirements.txt)..."
+  if [ ! -x "$BASE_DIR/venv/bin/pip" ]; then
+    python3 -m venv venv
+  fi
+  "$BASE_DIR/venv/bin/pip" install -r requirements.txt
+
+  echo "📦 Updating Node dependencies..."
+  npm install
+
+  echo "✅ Update complete"
+}
+
+start() {
+  cd "$BASE_DIR" || exit 1
+  load_config
+  PYTHON_CMD="$BASE_DIR/venv/bin/python3"
+  if [ ! -x "$PYTHON_CMD" ]; then
+    PYTHON_CMD="python3"
+  fi
+
+  FASTAPI_PORT="${FASTAPI_PORT:-8100}"
+  WA_API_PORT="${WA_API_PORT:-8101}"
+  REMOTE_BRIDGE_URL="${REMOTE_BRIDGE_URL:-http://localhost:${FASTAPI_PORT}}"
+  BRIDGE_SERVER_URL="${BRIDGE_SERVER_URL:-${REMOTE_BRIDGE_URL}/webhook/message}"
+
+  export BOT_TRIGGER="${BOT_TRIGGER:-kuun}"
+
+  # Ensure we have a valid config and secret key before starting
+  ensure_config
+  load_config
+
+  export BRIDGE_SECRET_KEY="${BRIDGE_SECRET_KEY}"
+
+  export SERVER_BIND_HOST="${SERVER_BIND_HOST:-127.0.0.1}"
+  export WA_API_BIND_HOST="${WA_API_BIND_HOST:-127.0.0.1}"
+  export FASTAPI_PORT
+  export WA_API_PORT
+  export REMOTE_BRIDGE_URL
+  export BRIDGE_SERVER_URL
+  export POLL_INTERVAL="${POLL_INTERVAL:-2}"
+  export HEARTBEAT_INTERVAL="${HEARTBEAT_INTERVAL:-30}"
+
+  ensure_killed "server/main.py" "FastAPI"
+  ensure_killed "whatsapp_bridge.mjs" "WhatsApp Bridge"
+  ensure_killed "brain/monitor.py" "AI Monitor"
+  ensure_killed "brain/heartbeat.py" "Heartbeat"
+
+  nohup "$PYTHON_CMD" server/main.py >> "$LOG_FILE" 2>&1 &
+  nohup node whatsapp_bridge.mjs >> "$LOG_FILE" 2>&1 &
+  nohup "$PYTHON_CMD" brain/monitor.py >> "$LOG_FILE" 2>&1 &
+  nohup "$PYTHON_CMD" brain/heartbeat.py >> "$LOG_FILE" 2>&1 &
+
+  if [ "${SYSTEM_AWAKE:-false}" = "true" ]; then
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      if ! pgrep -f "caffeinate -disu" >/dev/null; then
+        nohup caffeinate -disu sleep infinity >/dev/null 2>&1 &
+      fi
+    fi
+  fi
+
+  echo "✅ Kuun started"
+  echo "🔌 FastAPI: http://localhost:${FASTAPI_PORT}"
+  echo "🔌 WA Send API: http://localhost:${WA_API_PORT}"
+  echo "📄 Logs: tail -f $LOG_FILE"
+}
+
+stop() {
+  ensure_killed "server/main.py" "FastAPI"
+  ensure_killed "whatsapp_bridge.mjs" "WhatsApp Bridge"
+  ensure_killed "brain/monitor.py" "AI Monitor"
+  ensure_killed "brain/heartbeat.py" "Heartbeat"
+  echo "✅ Kuun stopped"
+}
+
+kill_all() {
+  stop
+  ensure_killed "caffeinate -disu" "Awake Keeper"
+  echo "💀 Force killed all Kuun-related processes."
+}
+
+restart() {
+  local KUUN_EXE="$BASE_DIR/kuun"
+  "$KUUN_EXE" stop
+  sleep 1
+  "$KUUN_EXE" start
+}
+
+is_running() {
+  pgrep -f "$1" >/dev/null
+}
+
+status() {
+  load_config
+  FASTAPI_PORT="${FASTAPI_PORT:-8100}"
+  WA_API_PORT="${WA_API_PORT:-8101}"
+
+  echo "📊 *System Status:*"
+  echo "📊 Kuun Status:"
+
+  if is_running "server/main.py"; then
+    echo "🔹 FastAPI: RUNNING (port ${FASTAPI_PORT})"
+  else
+    echo "🔹 FastAPI: OFFLINE (port ${FASTAPI_PORT})"
+  fi
+
+  if is_running "whatsapp_bridge.mjs"; then
+    echo "🔹 WhatsApp Bridge: RUNNING (port ${WA_API_PORT})"
+  else
+    echo "🔹 WhatsApp Bridge: OFFLINE (port ${WA_API_PORT})"
+  fi
+
+  if is_running "brain/monitor.py"; then
+    echo "🔹 AI Monitor: RUNNING (Poll: ${POLL_INTERVAL:-2}s)"
+  else
+    echo "🔹 AI Monitor: OFFLINE"
+  fi
+
+  if is_running "brain/heartbeat.py"; then
+    echo "🔹 Heartbeat: RUNNING (${HEARTBEAT_INTERVAL:-30}s interval)"
+  else
+    echo "🔹 Heartbeat: OFFLINE"
+  fi
+
+  # Memory Check
+  if [ -d "$BASE_DIR/brain/kuun_memory" ]; then
+    local P_CMD="python3"
+    if [ -f "$BASE_DIR/venv/bin/python3" ]; then P_CMD="$BASE_DIR/venv/bin/python3"; fi
+
+    local MEM_COUNT=$("$P_CMD" "$BASE_DIR/brain/memory.py" status 2>/dev/null)
+    if [ -z "$MEM_COUNT" ]; then MEM_COUNT="0"; fi
+
+    local SINCE_DATE=""
+    local LOG_FILE="$BASE_DIR/brain/kuun_memory/memory_log.jsonl"
+    if [ -f "$LOG_FILE" ] && [ "$MEM_COUNT" -gt 0 ]; then
+      local FIRST_TS=$(head -n 1 "$LOG_FILE" | grep -o '"timestamp": *"[^"]*"' | head -n 1 | cut -d'"' -f4)
+      if [ -n "$FIRST_TS" ]; then
+        SINCE_DATE=" (since ${FIRST_TS:0:10} ${FIRST_TS:11:5})"
+      fi
+    fi
+
+    echo "🔹 Memory: ACTIVE ($MEM_COUNT records)$SINCE_DATE"
+  else
+    echo "🔹 Memory: OFFLINE"
+  fi
+
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    if pgrep -f "caffeinate -disu" >/dev/null; then
+      echo "🔹 Power: AWAKE (Continuous Mode)"
+    else
+      echo "🔹 Power: NORMAL"
+    fi
+  else
+    echo "🔹 Power: NORMAL"
+  fi
+}
+
+whatsapp() {
+  cd "$BASE_DIR" || exit 1
+  load_config
+  FASTAPI_PORT="${FASTAPI_PORT:-8100}"
+  WA_API_PORT="${WA_API_PORT:-8101}"
+  REMOTE_BRIDGE_URL="${REMOTE_BRIDGE_URL:-http://localhost:${FASTAPI_PORT}}"
+  BRIDGE_SERVER_URL="${BRIDGE_SERVER_URL:-${REMOTE_BRIDGE_URL}/webhook/message}"
+
+  export BOT_TRIGGER="${BOT_TRIGGER:-kuun}"
+  export BRIDGE_SECRET_KEY="${BRIDGE_SECRET_KEY:-}"
+  export SERVER_BIND_HOST="${SERVER_BIND_HOST:-127.0.0.1}"
+  export WA_API_BIND_HOST="${WA_API_BIND_HOST:-127.0.0.1}"
+  export FASTAPI_PORT
+  export WA_API_PORT
+  export REMOTE_BRIDGE_URL
+  export BRIDGE_SERVER_URL
+
+  node whatsapp_bridge.mjs
+}
+
+whatsapp_link() {
+  cd "$BASE_DIR" || exit 1
+
+  if [ -d "$BASE_DIR/.kuun_cache" ]; then
+    local backup_dir="$BASE_DIR/.kuun_cache.backup.$(date +%Y%m%d%H%M%S)"
+    echo "🔄 Resetting WhatsApp auth cache to force a fresh QR code..."
+    mv "$BASE_DIR/.kuun_cache" "$backup_dir"
+    echo "📦 Previous auth cache backed up to: $backup_dir"
+  fi
+
+  whatsapp
+}
+
+help_cmd() {
+  load_config
+  local AWAKE_STATE="OFF"
+  if [[ "$OSTYPE" == "darwin"* ]] && pgrep -f "caffeinate -disu" >/dev/null; then
+    AWAKE_STATE="ON"
+  fi
+
+  echo "Kuun CLI"
+  echo "Usage: kuun <command>"
+  echo ""
+  echo "Commands:"
+  echo "  setup               Install dependencies"
+  echo "  update              Pull latest code and refresh dependencies"
+  echo "  start               Start services"
+  echo "  stop                Stop services"
+  echo "  kill                Force kill Kuun-related processes"
+  echo "  restart             Restart services"
+  echo "  status              Show service status"
+  echo "  name <name>         Set bot trigger name"
+  echo "  gemini <model>      Switch Gemini model (e.g. gemini-3.1-flash-lite)"
+  echo "  tokens <in> <out>   Set Gemini price metadata"
+  echo "  geminikey <key>     Set GOOGLE_API_KEY in config"
+  echo "  gmail <user> <pass> Configure Gmail app password"
+  echo "  add-number <num>    Whitelist a number (e.g. 38591...)"
+  echo "  remove-number <n>   Remove number from whitelist"
+  echo "  users               Show allowed numbers"
+  echo "  list-numbers        Alias for users"
+  echo "  whitelist <name> [pushname] Whitelist alias (new style)"
+  echo "  whitelist add <n>   Legacy add command (compatibility)"
+  echo "  whitelist remove <n> Remove a contact from allowed list"
+  echo "  whitelist           Show allowed contacts"
+  echo "  whitelist group add <id-or-name>    Allow conversational replies in group"
+  echo "  whitelist group remove <id-or-name> Remove group from allowed list"
+  echo "  whitelist group     Show allowed groups"
+  echo "  whatsapp            Run WhatsApp bridge in foreground"
+  echo "  whatsapp link       Launch WhatsApp linking process (QR code)"
+  echo "  gitpull             Pull latest changes and refresh dependencies"
+  echo "  awake               Keep system awake [STATUS: $AWAKE_STATE]"
+  echo "  awakestop           Allow system to sleep again"
+  echo "  help                Show this message"
+  echo ""
+  echo "Remote Commands (WhatsApp):"
+  echo "  [${BOT_TRIGGER:-kuun}] set job which will at <HH:MM> check <cmd>  Schedule a recurring background job"
+  echo "  [${BOT_TRIGGER:-kuun}] list all scheduled jobs                    List jobs and their IDs"
+  echo "  [${BOT_TRIGGER:-kuun}] remove the scheduled job with ID <id>      Delete a scheduled job"
+  echo "  [${BOT_TRIGGER:-kuun}] - <q>                  Run Gemini in background (also: g <q>)"
+  echo "  [${BOT_TRIGGER:-kuun}] c <task>               Run Codex in background (also: codex <task>)"
+  echo "  [${BOT_TRIGGER:-kuun}] status                 Show Kuun status"
+  echo "  [${BOT_TRIGGER:-kuun}] restart                Restart Kuun services"
+  echo "  [${BOT_TRIGGER:-kuun}] whitelist <name> [pushname] Add a trusted contact"
+  echo "  [${BOT_TRIGGER:-kuun}] whitelist remove <name> Remove a trusted contact"
+  echo "  [${BOT_TRIGGER:-kuun}] whitelist              Show trusted contacts"
+  echo "  [${BOT_TRIGGER:-kuun}] whitelist group add <ID> Allow replies in a group"
+  echo "  [${BOT_TRIGGER:-kuun}] whitelist group remove <ID> Remove a group from allowlist"
+  echo "  [${BOT_TRIGGER:-kuun}] whitelist group        Show allowed groups"
+  echo ""
+  echo "Logs:"
+  echo "  tail -f $LOG_FILE"
+}
+
+case "$1" in
+  setup)
+    setup
+    ;;
+  update)
+    update
+    ;;
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  kill)
+    kill_all
+    ;;
+  restart)
+    restart
+    ;;
+  status)
+    status
+    ;;
+  name)
+    if [ -z "$2" ]; then
+      echo "Usage: kuun name <name>"
+      exit 1
+    fi
+    update_config "BOT_TRIGGER" "$2"
+    echo "✅ BOT_TRIGGER set to: $2"
+    ;;
+  geminikey)
+    if [ -z "$2" ]; then
+      echo "Usage: kuun geminikey <key>"
+      exit 1
+    fi
+    update_config "GOOGLE_API_KEY" "$2"
+    echo "✅ GOOGLE_API_KEY saved"
+    ;;
+  gemini)
+    set_gemini_model "$2"
+    ;;
+  tokens)
+    set_token_prices "$2" "$3"
+    ;;
+  gmail)
+    set_gmail "$2" "$3"
+    ;;
+  add-number)
+    add_number "$2"
+    ;;
+  remove-number)
+    remove_number "$2"
+    ;;
+  users)
+    list_users
+    ;;
+  list-numbers)
+    list_users
+    ;;
+  whitelist)
+    if [ "$2" = "add" ] && [ -n "$3" ]; then
+      echo "Use via WhatsApp: ${BOT_TRIGGER:-kuun} whitelist add $3"
+    elif [ "$2" = "remove" ] && [ -n "$3" ]; then
+      echo "Use via WhatsApp: ${BOT_TRIGGER:-kuun} whitelist remove $3"
+    elif [ "$2" = "group" ] && [ "$3" = "add" ] && [ -n "$4" ]; then
+      echo "Use via WhatsApp: ${BOT_TRIGGER:-kuun} whitelist group add $4"
+    elif [ "$2" = "group" ] && [ "$3" = "remove" ] && [ -n "$4" ]; then
+      echo "Use via WhatsApp: ${BOT_TRIGGER:-kuun} whitelist group remove $4"
+    elif [ "$2" = "group" ]; then
+      echo "Use via WhatsApp: ${BOT_TRIGGER:-kuun} whitelist group"
+    elif [ -n "$2" ]; then
+      shift 1
+      echo "Use via WhatsApp: ${BOT_TRIGGER:-kuun} whitelist $*"
+    else
+      echo "Use via WhatsApp: ${BOT_TRIGGER:-kuun} whitelist"
+    fi
+    ;;
+  whatsapp)
+    if [ "$2" = "link" ]; then
+      whatsapp_link
+    elif [ -z "$2" ]; then
+      whatsapp
+    else
+      echo "Usage: kuun whatsapp [link]"
+      exit 1
+    fi
+    ;;
+  gitpull)
+    update
+    ;;
+  awake|macawake)
+    system_awake
+    ;;
+  awakestop|macawakestop)
+    system_awake_stop
+    ;;
+  help|--help|-h|"")
+    help_cmd
+    ;;
+  *)
+    echo "Unknown command: $1"
+    help_cmd
+    exit 1
+    ;;
+esac

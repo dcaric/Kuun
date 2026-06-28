@@ -1,0 +1,1259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kuun Local Console</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  
+  <!-- Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Highlight.js for Code Highlighting -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+  
+  <!-- Marked.js for Markdown Parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  
+  <!-- Configuration Script (exposes BRIDGE_SECRET_KEY and BOT_TRIGGER) -->
+  <script src="/config.js"></script>
+
+  <style>
+    :root {
+      --bg-dark: #0f111a;
+      --bg-sidebar: rgba(18, 20, 32, 0.7);
+      --bg-chat: rgba(15, 17, 26, 0.5);
+      --glass-bg: rgba(30, 32, 50, 0.4);
+      --glass-border: rgba(255, 255, 255, 0.08);
+      --glow-purple: rgba(147, 51, 234, 0.5);
+      --glow-blue: rgba(59, 130, 246, 0.5);
+      --glow-green: rgba(34, 197, 94, 0.5);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --accent-gradient: linear-gradient(135deg, #a855f7 0%, #3b82f6 100%);
+      --user-msg-gradient: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+      --kuun-msg-bg: rgba(26, 29, 46, 0.85);
+      
+      --status-online: #10b981;
+      --status-offline: #ef4444;
+      --status-warning: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(147, 51, 234, 0.15) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(59, 130, 246, 0.15) 0px, transparent 50%);
+    }
+
+    /* Layout structure */
+    .app-container {
+      width: 95vw;
+      height: 90vh;
+      max-width: 1400px;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      background: rgba(10, 11, 18, 0.6);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--glass-border);
+      border-radius: 24px;
+      overflow: hidden;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+
+    /* Sidebar Styling */
+    aside {
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--glass-border);
+      display: flex;
+      flex-direction: flex-col;
+      flex-flow: column;
+      height: 100%;
+      padding: 24px;
+      justify-content: space-between;
+    }
+
+    .sidebar-top {
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .brand-logo {
+      width: 48px;
+      height: 48px;
+      background: var(--accent-gradient);
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 20px var(--glow-purple);
+      position: relative;
+    }
+
+    .brand-logo i {
+      font-size: 20px;
+      color: #fff;
+    }
+
+    .brand-logo::after {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      background: var(--accent-gradient);
+      border-radius: 16px;
+      z-index: -1;
+      opacity: 0.5;
+      filter: blur(4px);
+    }
+
+    .brand-info h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      background: var(--accent-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .brand-info span {
+      font-size: 11px;
+      color: var(--text-muted);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .status-panel {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .status-panel-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .service-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .service-name {
+      font-size: 13px;
+      font-weight: 500;
+      color: #d1d5db;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .service-name i {
+      width: 16px;
+      color: var(--text-muted);
+    }
+
+    .service-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 4px 8px;
+      border-radius: 9999px;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .indicator.online {
+      background-color: var(--status-online);
+      box-shadow: 0 0 8px var(--status-online);
+    }
+
+    .indicator.offline {
+      background-color: var(--status-offline);
+      box-shadow: 0 0 8px var(--status-offline);
+    }
+
+    .sidebar-bottom {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: auto;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 1px solid var(--glass-border);
+      background: rgba(255, 255, 255, 0.03);
+      color: #fff;
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      transition: all 0.2s ease;
+    }
+
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .btn-danger:hover {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+    }
+
+    /* Main Chat Container */
+    main {
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-chat);
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Chat Header */
+    .chat-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--glass-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 10;
+    }
+
+    .chat-header-info h2 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .chat-header-info p {
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 2px;
+    }
+
+    .chat-header-actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    /* Chat Messages Area */
+    .chat-messages {
+      flex: 1;
+      padding: 24px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      scroll-behavior: smooth;
+    }
+
+    /* Custom Scrollbar */
+    .chat-messages::-webkit-scrollbar, aside::-webkit-scrollbar {
+      width: 6px;
+    }
+    .chat-messages::-webkit-scrollbar-track, aside::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .chat-messages::-webkit-scrollbar-thumb, aside::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 9999px;
+    }
+    .chat-messages::-webkit-scrollbar-thumb:hover, aside::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .welcome-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      text-align: center;
+      padding: 40px;
+      gap: 16px;
+    }
+
+    .welcome-icon {
+      font-size: 48px;
+      background: var(--accent-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+      animation: pulse 3s infinite ease-in-out;
+    }
+
+    .welcome-container h3 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 22px;
+      font-weight: 600;
+    }
+
+    .welcome-container p {
+      font-size: 14px;
+      color: var(--text-muted);
+      max-width: 420px;
+      line-height: 1.5;
+    }
+
+    .quick-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 16px;
+      max-width: 500px;
+    }
+
+    .quick-tag {
+      padding: 8px 14px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--glass-border);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      color: #d1d5db;
+    }
+
+    .quick-tag:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.2);
+      transform: translateY(-2px);
+    }
+
+    /* Message Item styling */
+    .message-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-width: 80%;
+    }
+
+    .message-group.user {
+      align-self: flex-end;
+      align-items: flex-end;
+    }
+
+    .message-group.kuun {
+      align-self: flex-start;
+      align-items: flex-start;
+    }
+
+    .message-sender {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-left: 4px;
+      margin-right: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .message-bubble {
+      padding: 14px 18px;
+      border-radius: 18px;
+      font-size: 14px;
+      line-height: 1.6;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+      word-break: break-word;
+    }
+
+    .message-group.user .message-bubble {
+      background: var(--user-msg-gradient);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+      box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+    }
+
+    .message-group.kuun .message-bubble {
+      background: var(--kuun-msg-bg);
+      color: #e5e7eb;
+      border-bottom-left-radius: 4px;
+      border: 1px solid var(--glass-border);
+    }
+
+    /* Sub logs / status updates */
+    .message-logs {
+      font-family: 'Fira Code', monospace;
+      font-size: 11px;
+      color: var(--status-warning);
+      background: rgba(0, 0, 0, 0.25);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-top: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      border: 1px dashed rgba(245, 158, 11, 0.2);
+      width: 100%;
+    }
+
+    .log-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .log-item i {
+      animation: spin 2s infinite linear;
+      font-size: 10px;
+    }
+
+    /* Markdown styling inside bubbles */
+    .message-bubble h1, .message-bubble h2, .message-bubble h3 {
+      font-family: 'Outfit', sans-serif;
+      margin-top: 12px;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    .message-bubble h1 { font-size: 18px; }
+    .message-bubble h2 { font-size: 16px; }
+    .message-bubble h3 { font-size: 14px; }
+    
+    .message-bubble p {
+      margin-bottom: 8px;
+    }
+    .message-bubble p:last-child {
+      margin-bottom: 0;
+    }
+
+    .message-bubble ul, .message-bubble ol {
+      margin-left: 20px;
+      margin-bottom: 8px;
+    }
+
+    .message-bubble li {
+      margin-bottom: 4px;
+    }
+
+    .message-bubble code {
+      font-family: 'Fira Code', monospace;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #f472b6;
+    }
+
+    .message-bubble pre {
+      margin-top: 10px;
+      margin-bottom: 10px;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .message-bubble pre code {
+      display: block;
+      padding: 14px;
+      overflow-x: auto;
+      font-size: 12.5px;
+      line-height: 1.5;
+      background: #12131e;
+      color: #e5e7eb;
+      border: 1px solid var(--glass-border);
+    }
+
+    .message-bubble table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 13px;
+    }
+
+    .message-bubble th, .message-bubble td {
+      border: 1px solid var(--glass-border);
+      padding: 8px 12px;
+      text-align: left;
+    }
+
+    .message-bubble th {
+      background: rgba(255, 255, 255, 0.05);
+      font-weight: 600;
+    }
+
+    .message-bubble tr:nth-child(even) {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    /* Input area */
+    .input-container {
+      padding: 24px;
+      border-top: 1px solid var(--glass-border);
+      display: flex;
+      gap: 16px;
+      align-items: flex-end;
+      z-index: 10;
+    }
+
+    .input-wrap {
+      flex: 1;
+      position: relative;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      transition: all 0.3s ease;
+    }
+
+    .input-wrap:focus-within {
+      background: rgba(255, 255, 255, 0.04);
+      border-color: #818cf8;
+      box-shadow: 0 0 15px rgba(99, 102, 241, 0.15);
+    }
+
+    textarea {
+      width: 100%;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: #fff;
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      padding: 14px 16px;
+      resize: none;
+      height: 48px;
+      min-height: 48px;
+      max-height: 160px;
+      display: block;
+      line-height: 1.5;
+    }
+
+    /* Send Button */
+    .send-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 16px;
+      border: none;
+      background: var(--accent-gradient);
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+    }
+
+    .send-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(99, 102, 241, 0.5);
+    }
+
+    .send-btn:active {
+      transform: translateY(0);
+    }
+
+    .send-btn i {
+      font-size: 16px;
+    }
+
+    /* Animations */
+    @keyframes pulse {
+      0%, 100% { opacity: 0.8; transform: scale(1); filter: drop-shadow(0 0 5px var(--glow-purple)); }
+      50% { opacity: 1; transform: scale(1.05); filter: drop-shadow(0 0 15px var(--glow-purple)); }
+    }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .mode-selector {
+      display: flex;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+      padding: 4px;
+      margin-bottom: 2px;
+      align-self: flex-start;
+      gap: 4px;
+    }
+
+    .mode-btn {
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      font-family: 'Inter', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+    }
+
+    .mode-btn:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .mode-btn.active {
+      background: var(--accent-gradient);
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(147, 51, 234, 0.3);
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .app-container {
+        grid-template-columns: 1fr;
+        width: 100vw;
+        height: 100vh;
+        border-radius: 0;
+        border: none;
+      }
+      aside {
+        display: none; /* Hide sidebar on small screens for simplicity */
+      }
+    }
+
+    /* Premium Custom Confirmation Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(10, 11, 18, 0.7);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-content {
+      background: rgba(20, 22, 36, 0.95);
+      border: 1px solid var(--glass-border);
+      border-radius: 20px;
+      width: 90%;
+      max-width: 450px;
+      padding: 24px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 30px rgba(239, 68, 68, 0.1);
+      transform: translateY(20px) scale(0.95);
+      transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .modal-overlay.active .modal-content {
+      transform: translateY(0) scale(1);
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .modal-icon {
+      font-size: 24px;
+      color: #ef4444;
+      text-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+    }
+
+    .modal-header h3 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 18px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .modal-body p {
+      font-size: 14px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      margin-top: 8px;
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--glass-border);
+      color: var(--text-main);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="app-container">
+    
+    <!-- Sidebar -->
+    <aside>
+      <div class="sidebar-top">
+        <!-- Brand / Header -->
+        <div class="brand">
+          <div class="brand-logo">
+            <i class="fa-solid fa-brain"></i>
+          </div>
+          <div class="brand-info">
+            <h1>Kuun</h1>
+            <span>Local AI Agent</span>
+          </div>
+        </div>
+
+        <!-- Real-time Service Status -->
+        <div class="status-panel">
+          <div class="status-panel-title">
+            <i class="fa-solid fa-server"></i>
+            <span>Services Status</span>
+          </div>
+          
+          <div class="service-row">
+            <span class="service-name">
+              <i class="fa-solid fa-code"></i> FastAPI
+            </span>
+            <span class="service-status" id="status-fastapi">
+              <span class="indicator offline"></span> checking
+            </span>
+          </div>
+
+          <div class="service-row">
+            <span class="service-name">
+              <i class="fa-brands fa-whatsapp"></i> WhatsApp Bridge
+            </span>
+            <span class="service-status" id="status-whatsapp">
+              <span class="indicator offline"></span> checking
+            </span>
+          </div>
+
+          <div class="service-row">
+            <span class="service-name">
+              <i class="fa-solid fa-eye"></i> AI Monitor
+            </span>
+            <span class="service-status" id="status-monitor">
+              <span class="indicator offline"></span> checking
+            </span>
+          </div>
+
+          <div class="service-row">
+            <span class="service-name">
+              <i class="fa-solid fa-heartbeat"></i> Heartbeat
+            </span>
+            <span class="service-status" id="status-heartbeat">
+              <span class="indicator offline"></span> checking
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sidebar Bottom actions -->
+      <div class="sidebar-bottom">
+        <button class="btn btn-danger" onclick="confirmClearHistory()">
+          <i class="fa-solid fa-trash-can"></i> Clear History
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Chat Window -->
+    <main>
+      <!-- Chat Area Header -->
+      <div class="chat-header">
+        <div class="chat-header-info">
+          <h2>Kuun Console</h2>
+          <p id="chat-sub-status">
+            <i class="fa-solid fa-circle-notch fa-spin"></i> Connecting to Kuun server...
+          </p>
+        </div>
+        <div class="chat-header-actions">
+          <button class="btn" style="width: auto; padding: 8px 12px;" onclick="fetchHistory()" title="Force Refresh">
+            <i class="fa-solid fa-arrows-rotate"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Messages Stream -->
+      <div class="chat-messages" id="chat-messages">
+        <!-- Welcome Screen (shown when history is empty) -->
+        <div class="welcome-container" id="welcome-screen">
+          <div class="welcome-icon">
+            <i class="fa-solid fa-face-smile-wink"></i>
+          </div>
+          <h3>Talk to Kuun Locally</h3>
+          <p>You can send commands directly to Kuun. Standard triggers like <strong>kuun - &lt;query&gt;</strong> or <strong>kuun c &lt;task&gt;</strong> are fully supported here.</p>
+          
+          <div class="quick-tags">
+            <div class="quick-tag" onclick="useQuickCommand('kuun status')">kuun status</div>
+            <div class="quick-tag" onclick="useQuickCommand('kuun - what time is it in Zagreb?')">kuun - Zagreb time</div>
+            <div class="quick-tag" onclick="useQuickCommand('kuun c check Kuun status')">kuun c check repo</div>
+            <div class="quick-tag" onclick="useQuickCommand('kuun help')">kuun help</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Message Input Box -->
+      <div class="input-container" style="flex-direction: column; align-items: stretch; gap: 12px;">
+        
+        <!-- Mode Selector Toggle -->
+        <div class="mode-selector">
+          <button class="mode-btn active" id="mode-chat" onclick="setMode('chat')">
+            <i class="fa-solid fa-comments"></i> <span>Chat (Gemini)</span>
+          </button>
+          <button class="mode-btn" id="mode-agent" onclick="setMode('agent')">
+            <i class="fa-solid fa-bolt"></i> <span>Agent (Codex)</span>
+          </button>
+        </div>
+
+        <div style="display: flex; gap: 16px; align-items: flex-end; width: 100%;">
+          <div class="input-wrap">
+            <textarea 
+              id="message-input" 
+              placeholder="Ask Gemini anything... (Replies instantly)"
+              onkeydown="handleTextareaKeydown(event)"
+              oninput="autoResizeTextarea()"></textarea>
+          </div>
+          <button class="send-btn" onclick="sendMessage()" id="send-button">
+            <i class="fa-solid fa-paper-plane"></i>
+          </button>
+        </div>
+      </div>
+
+    </main>
+
+  </div>
+
+  <script>
+    let lastHistoryJson = "";
+    let currentMode = "chat";
+
+    function setMode(mode) {
+      currentMode = mode;
+      document.getElementById('mode-chat').classList.toggle('active', mode === 'chat');
+      document.getElementById('mode-agent').classList.toggle('active', mode === 'agent');
+      
+      const textarea = document.getElementById('message-input');
+      if (mode === 'chat') {
+        textarea.placeholder = "Ask Gemini anything... (Replies instantly)";
+      } else {
+        textarea.placeholder = "Enter a task for Codex (e.g. list files)... (Auto-prepends 'kuun c')";
+      }
+      textarea.focus();
+    }
+    
+    // Set custom marked rendering options
+    marked.setOptions({
+      highlight: function(code, lang) {
+        if (lang && hljs.getLanguage(lang)) {
+          return hljs.highlight(code, { language: lang }).value;
+        }
+        return hljs.highlightAuto(code).value;
+      },
+      breaks: true
+    });
+
+    // Check token presence
+    if (typeof BRIDGE_SECRET_KEY === 'undefined' || !BRIDGE_SECRET_KEY) {
+      console.error("🔑 BRIDGE_SECRET_KEY is not defined in config.js. Ensure server served it correctly.");
+    }
+
+    // Auto-resize message input box based on content
+    function autoResizeTextarea() {
+      const textarea = document.getElementById("message-input");
+      textarea.style.height = 'auto';
+      textarea.style.height = (textarea.scrollHeight) + 'px';
+    }
+
+    // Enter key sends the message, Shift+Enter does standard newline
+    function handleTextareaKeydown(event) {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+      }
+    }
+
+    // Load a quick prompt into input
+    function useQuickCommand(cmd) {
+      const textarea = document.getElementById("message-input");
+      textarea.value = cmd;
+      textarea.focus();
+      autoResizeTextarea();
+    }
+
+    // API Helper: headers
+    function getHeaders() {
+      const token = typeof BRIDGE_SECRET_KEY !== 'undefined' ? BRIDGE_SECRET_KEY : '';
+      return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      };
+    }
+
+    // Fetch service status from server
+    async function fetchStatus() {
+      try {
+        const response = await fetch('/api/status', {
+          headers: getHeaders()
+        });
+        if (!response.ok) throw new Error("Status check failed");
+        const status = await response.json();
+        
+        updateStatusBadge('status-fastapi', status.fastapi);
+        updateStatusBadge('status-whatsapp', status.whatsapp_bridge);
+        updateStatusBadge('status-monitor', status.ai_monitor);
+        updateStatusBadge('status-heartbeat', status.heartbeat);
+
+        const subStatus = document.getElementById('chat-sub-status');
+        if (status.ai_monitor) {
+          subStatus.innerHTML = '<i class="fa-solid fa-circle" style="color: var(--status-online); font-size: 8px;"></i> Kuun is online and ready';
+        } else {
+          subStatus.innerHTML = '<i class="fa-solid fa-circle" style="color: var(--status-warning); font-size: 8px;"></i> Warning: AI Monitor is offline';
+        }
+      } catch (err) {
+        updateStatusBadge('status-fastapi', false);
+        updateStatusBadge('status-whatsapp', false);
+        updateStatusBadge('status-monitor', false);
+        updateStatusBadge('status-heartbeat', false);
+
+        document.getElementById('chat-sub-status').innerHTML = 
+          '<i class="fa-solid fa-triangle-exclamation" style="color: var(--status-offline);"></i> Cannot reach FastAPI server';
+      }
+    }
+
+    function updateStatusBadge(id, isOnline) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (isOnline) {
+        el.innerHTML = '<span class="indicator online"></span> active';
+      } else {
+        el.innerHTML = '<span class="indicator offline"></span> offline';
+      }
+    }
+
+    // Fetch chat history from server
+    async function fetchHistory() {
+      try {
+        const response = await fetch('/api/history', {
+          headers: getHeaders()
+        });
+        if (!response.ok) return;
+        const history = await response.json();
+        
+        // Only re-render if the history payload changed
+        const historyStr = JSON.stringify(history);
+        if (historyStr === lastHistoryJson) return;
+        lastHistoryJson = historyStr;
+        
+        renderHistory(history);
+      } catch (err) {
+        console.error("Failed to load chat history:", err);
+      }
+    }
+
+    // Render historical messages in the container
+    function renderHistory(history) {
+      const container = document.getElementById('chat-messages');
+      const welcomeScreen = document.getElementById('welcome-screen');
+      
+      // If history is empty, show the welcome screen
+      if (!history || history.length === 0) {
+        container.innerHTML = '';
+        container.appendChild(welcomeScreen);
+        welcomeScreen.style.display = 'flex';
+        return;
+      }
+      
+      welcomeScreen.style.display = 'none';
+      
+      // Save scroll position
+      const isAtBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 100;
+      
+      // Clear old items (except welcome screen which is hidden)
+      const messageGroups = container.querySelectorAll('.message-group');
+      messageGroups.forEach(el => el.remove());
+      
+      history.forEach(item => {
+        // 1) User Prompt message
+        const userGroup = document.createElement('div');
+        userGroup.className = 'message-group user';
+        
+        const userMeta = document.createElement('div');
+        userMeta.className = 'message-sender';
+        const dateStr = formatTimestamp(item.timestamp);
+        const sourceIcon = item.source === 'whatsapp' ? '<i class="fa-brands fa-whatsapp"></i> ' : '<i class="fa-solid fa-laptop"></i> ';
+        userMeta.innerHTML = `${sourceIcon} ${item.pushName || item.sender} &bull; ${dateStr}`;
+        userGroup.appendChild(userMeta);
+        
+        const userBubble = document.createElement('div');
+        userBubble.className = 'message-bubble';
+        
+        // Strip auto-prepended triggers for clean UI rendering
+        let displayText = item.text;
+        if (item.source === 'web') {
+          const lower = displayText.toLowerCase();
+          if (lower.startsWith('kuun c ')) {
+            displayText = displayText.slice(7);
+          } else if (lower.startsWith('kuun - ')) {
+            displayText = displayText.slice(7);
+          } else if (lower.startsWith('kuun g ')) {
+            displayText = displayText.slice(7);
+          } else if (lower.startsWith('c ')) {
+            displayText = displayText.slice(2);
+          } else if (lower.startsWith('- ')) {
+            displayText = displayText.slice(2);
+          }
+        }
+        userBubble.textContent = displayText;
+        userGroup.appendChild(userBubble);
+        
+        container.appendChild(userGroup);
+        
+        // 2) Kuun Response / Progress message (if exists or is executing)
+        if (item.status !== 'pending' || item.updates.length > 0 || item.output) {
+          const kuunGroup = document.createElement('div');
+          kuunGroup.className = 'message-group kuun';
+          
+          const kuunMeta = document.createElement('div');
+          kuunMeta.className = 'message-sender';
+          kuunMeta.innerHTML = `<i class="fa-solid fa-robot"></i> Kuun &bull; ${item.status.toUpperCase()}`;
+          kuunGroup.appendChild(kuunMeta);
+          
+          const kuunBubble = document.createElement('div');
+          kuunBubble.className = 'message-bubble';
+          
+          if (item.output) {
+            // Render markdown output
+            kuunBubble.innerHTML = marked.parse(item.output);
+          } else if (item.status === 'processing' || item.status === 'pending') {
+            kuunBubble.innerHTML = `<p><i class="fa-solid fa-circle-notch fa-spin"></i> Processing task...</p>`;
+          } else {
+            kuunBubble.innerHTML = `<p>Task resolved with no output.</p>`;
+          }
+          
+          // Render progress logs if any updates exist (and task is not completed)
+          if (item.updates && item.updates.length > 0 && item.status !== 'completed') {
+            const logsDiv = document.createElement('div');
+            logsDiv.className = 'message-logs';
+            
+            item.updates.forEach((update, idx) => {
+              const logItem = document.createElement('div');
+              logItem.className = 'log-item';
+              // If it's the last update and the job is still active, show spinner
+              const isLastAndActive = (idx === item.updates.length - 1) && (item.status === 'processing' || item.status === 'pending');
+              const icon = isLastAndActive ? '<i class="fa-solid fa-circle-notch"></i>' : '<i class="fa-solid fa-check" style="color: var(--status-online);"></i>';
+              logItem.innerHTML = `${icon} <span>${update}</span>`;
+              logsDiv.appendChild(logItem);
+            });
+            
+            kuunGroup.appendChild(kuunBubble);
+            kuunGroup.appendChild(logsDiv);
+          } else {
+            kuunGroup.appendChild(kuunBubble);
+          }
+          
+          container.appendChild(kuunGroup);
+        }
+      });
+      
+      // Auto scroll if user was already at the bottom
+      if (isAtBottom) {
+        scrollToBottom();
+      }
+    }
+
+    function formatTimestamp(isoStr) {
+      if (!isoStr) return "";
+      try {
+        const d = new Date(isoStr);
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      } catch (e) {
+        return "";
+      }
+    }
+
+    function scrollToBottom() {
+      const container = document.getElementById('chat-messages');
+      container.scrollTop = container.scrollHeight;
+    }
+
+    // Send a new query to the local server
+    async function sendMessage() {
+      const textarea = document.getElementById('message-input');
+      let text = textarea.value.trim();
+      if (!text) return;
+
+      // Auto-prepend triggers if Codex agent mode is active and the user didn't write it manually
+      if (currentMode === 'agent') {
+        const textLower = text.toLowerCase();
+        const hasTrigger = textLower.startsWith('kuun c') || textLower.startsWith('kuun codex') || 
+                           textLower.startsWith('c ') || textLower.startsWith('codex ');
+        const isSystemCmd = textLower === 'status' || textLower === 'help' || textLower === 'restart' ||
+                            textLower.startsWith('kuun status') || textLower.startsWith('kuun help') || 
+                            textLower.startsWith('kuun restart');
+        if (!hasTrigger && !isSystemCmd) {
+          text = 'kuun c ' + text;
+        }
+      }
+
+      // Clear input box
+      textarea.value = '';
+      autoResizeTextarea();
+
+      // Submit task
+      try {
+        const response = await fetch('/webhook/message', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({
+            text: text,
+            sender: 'web_user',
+            pushName: 'Web Console',
+            source: 'web',
+            fromMe: true, // Always execute as admin/system user
+            mode: 'agent'
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to queue message");
+        }
+        
+        // Immediately trigger refresh to show queued message
+        fetchHistory();
+      } catch (err) {
+        alert("Could not queue message: " + err.message);
+      }
+    }
+
+    // Clear History API (using custom modal)
+    function confirmClearHistory() {
+      const modal = document.getElementById('custom-confirm-modal');
+      modal.style.display = 'flex';
+      // Force reflow
+      modal.offsetHeight;
+      modal.classList.add('active');
+    }
+
+    function closeConfirmModal() {
+      const modal = document.getElementById('custom-confirm-modal');
+      modal.classList.remove('active');
+      setTimeout(() => {
+        modal.style.display = 'none';
+      }, 300);
+    }
+
+    async function executeClearHistory() {
+      closeConfirmModal();
+      try {
+        const response = await fetch('/api/clear', {
+          method: 'POST',
+          headers: getHeaders()
+        });
+        if (response.ok) {
+          fetchHistory();
+        }
+      } catch (err) {
+        alert("Error clearing history: " + err.message);
+      }
+    }
+
+    // Start Polling loops
+    fetchStatus();
+    fetchHistory();
+    
+    // Poll status every 2 seconds
+    setInterval(fetchStatus, 2000);
+    // Poll chat history every 1 second
+    setInterval(fetchHistory, 1000);
+  </script>
+
+  <!-- Custom Premium Glassmorphic Modal -->
+  <div id="custom-confirm-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <i class="fa-solid fa-triangle-exclamation modal-icon"></i>
+        <h3>Clear Chat History</h3>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to clear the entire chat log? This will clear the history interface but will not stop any running background tasks.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeConfirmModal()">Cancel</button>
+        <button class="btn btn-danger" onclick="executeClearHistory()">Clear History</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
